@@ -57,6 +57,8 @@ cd uvz-local-library-mcp
 Installer сначала использует `$GIGACODE_HOME/.venv/bin/python`, если он есть;
 на рабочем окружении это Python GigaCode. При нестандартной установке можно
 выбрать interpreter явно: `PYTHON_BIN=/path/to/python3.13 ./install.sh ...`.
+Если корпоративная защита не даёт читать Python packages из `.gigacode`, runtime
+можно вынести в обычную workspace-папку: `MCP_RUNTIME_HOME=/path/to/projects/.mcp-runtime`.
 
 `--workspace` сам находит **каждый Git repository** под `$PROJECTS` и передаёт
 его в indexer один раз. Поэтому `jimmer-docs` отдельно указывать не нужно: если

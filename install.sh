@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 GIGACODE_HOME="${GIGACODE_HOME:-$HOME/.gigacode}"
+MCP_RUNTIME_HOME="${MCP_RUNTIME_HOME:-$GIGACODE_HOME}"
 PYTHON_BIN="${PYTHON_BIN:-}"
 if [ -z "$PYTHON_BIN" ] && [ -x "$GIGACODE_HOME/.venv/bin/python" ]; then
   PYTHON_BIN="$GIGACODE_HOME/.venv/bin/python"
@@ -26,7 +27,8 @@ while [ "$#" -gt 0 ]; do
 done
 
 mkdir -p "$GIGACODE_HOME" "$GIGACODE_HOME/skills"
-VENV="$GIGACODE_HOME/.local-library-mcp-venv"
+mkdir -p "$MCP_RUNTIME_HOME"
+VENV="$MCP_RUNTIME_HOME/.local-library-mcp-venv"
 if [ ! -x "$VENV/bin/python" ]; then
   "$SYS_PYTHON" -m venv "$VENV"
 fi
@@ -47,10 +49,9 @@ if [ -n "$KNOWLEDGE_PACK" ]; then
   "$PYTHON" "$SCRIPT_DIR/install_pack.py" "$KNOWLEDGE_PACK" --destination "$SCRIPT_DIR"
 fi
 
-ln -sfn "$SCRIPT_DIR" "$GIGACODE_HOME/local-library-mcp"
 ln -sfn "$SCRIPT_DIR/skill" "$GIGACODE_HOME/skills/library-knowledge-workflow"
 
-"$PYTHON" - "$GIGACODE_HOME/settings.json" "$PYTHON" "$GIGACODE_HOME/local-library-mcp/server.py" <<'PY'
+"$PYTHON" - "$GIGACODE_HOME/settings.json" "$PYTHON" "$SCRIPT_DIR/server.py" <<'PY'
 import json, sys
 from pathlib import Path
 path, python, server = map(Path, sys.argv[1:])
@@ -61,5 +62,5 @@ config.setdefault("mcpServers", {})["local-library-mcp"] = {
 path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
 PY
 
-echo "Installed local-library-mcp into $GIGACODE_HOME"
+echo "Installed local-library-mcp runtime into $MCP_RUNTIME_HOME"
 echo "Restart GigaCode to load the MCP server and skill."
