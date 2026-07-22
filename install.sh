@@ -2,8 +2,12 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SYS_PYTHON="$(command -v python3 || command -v python)"
 GIGACODE_HOME="${GIGACODE_HOME:-$HOME/.gigacode}"
+PYTHON_BIN="${PYTHON_BIN:-}"
+if [ -z "$PYTHON_BIN" ] && [ -x "$GIGACODE_HOME/.venv/bin/python" ]; then
+  PYTHON_BIN="$GIGACODE_HOME/.venv/bin/python"
+fi
+SYS_PYTHON="${PYTHON_BIN:-$(command -v python3 || command -v python)}"
 WORKSPACE=""
 SYNC=0
 CONFIGURATION_ROOTS=()
