@@ -13,7 +13,7 @@ SYNC=0
 CONFIGURATION_ROOTS=()
 KNOWLEDGE_PACK=""
 
-"$SYS_PYTHON" -c 'import sys; raise SystemExit("local-library-mcp requires Python 3.10 or newer; found %s" % sys.version.split()[0]) if sys.version_info < (3, 10) else None'
+"$SYS_PYTHON" -c 'import sys; sys.exit("local-library-mcp requires Python 3.10 or newer; found %s" % sys.version.split()[0]) if sys.version_info < (3, 10) else None'
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
