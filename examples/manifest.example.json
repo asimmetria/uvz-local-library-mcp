@@ -1,0 +1,34 @@
+{
+  "sources": [
+    {
+      "id": "sample-repository",
+      "modules": [
+        {"id": "shared-model", "path": "shared-model", "language": "java"},
+        {"id": "facade", "path": "facade", "language": "kotlin"},
+        {"id": "application", "path": "application", "language": "kotlin"}
+      ]
+    }
+  ],
+  "catalog": [
+    {
+      "id": "sample-model",
+      "type": "library",
+      "source_modules": ["sample-repository:shared-model"],
+      "aliases": ["sample model", "model"],
+      "capabilities": ["api", "examples"]
+    },
+    {
+      "id": "sample-facade",
+      "type": "library",
+      "source_modules": ["sample-repository:facade"],
+      "aliases": ["sample facade"],
+      "capabilities": ["api", "examples"]
+    },
+    {
+      "id": "sample-application",
+      "type": "application",
+      "source_modules": ["sample-repository:application"],
+      "capabilities": ["examples", "configuration"]
+    }
+  ]
+}
