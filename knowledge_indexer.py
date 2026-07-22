@@ -155,6 +155,16 @@ def walk(root):
             yield path, language
 
 
+def localized_docusaurus_content(root, path):
+    """Base docs are canonical; i18n trees are translated duplicates."""
+    relative = path.relative_to(root)
+    return (
+        ((root / "docusaurus.config.js").exists() or (root / "docusaurus.config.ts").exists())
+        and len(relative.parts) >= 2
+        and relative.parts[0] == "i18n"
+    )
+
+
 def discover_modules(root):
     """Return Gradle module directory -> Gradle module id, including nested modules."""
     modules = {root: ":"}
@@ -301,6 +311,9 @@ def main():
             if is_library_module(module_path, module_id, modules):
                 catalog.append({"id": repo + module_id.replace(":", "-"), "type": "library", "status": "discovered", "aliases": [module_name.replace("-", " ")], "sources": [repo + module_id], "capabilities": ["api", "examples"]})
         for path, language in walk(root):
+            if localized_docusaurus_content(root, path):
+                audit["files_skipped_localized_docusaurus_docs"] += 1
+                continue
             audit["files_seen"] += 1
             try:
                 raw = path.read_text(encoding="utf-8", errors="replace")
