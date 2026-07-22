@@ -41,6 +41,12 @@ For an application, describe its responsibility, published modules and
 integration/configuration boundaries instead of pretending it is a reusable
 library.
 
+For a `*-lib` library suite whose Gradle child modules can be connected
+independently, use a root `kind: library-suite` card as a map and create one
+`project-context.yaml` inside each consumable child module. The suite card
+links to child contexts; it must not combine their entrypoints and examples
+into one ambiguous API contract.
+
 ### `docs/usage/*.md`
 
 Each document is a short, reviewed golden path: dependency, imports, minimal
