@@ -5,8 +5,9 @@ description: "Use for questions about internal libraries, facades, shared models
 
 # Library Knowledge Workflow
 
-1. Call `mcp__local-library-mcp__list_libraries` if the relevant library or
-   domain is unclear.
+1. Call `mcp__local-library-mcp__list_libraries` if the relevant library is
+   unclear. Call `list_repositories` if the question concerns an application
+   or if its repository name is unclear.
 2. Call `mcp__local-library-mcp__search_knowledge` before proposing an API,
    dependency, configuration key or integration pattern.
 3. Call `get_source` for the strongest result when code accuracy matters.

@@ -42,7 +42,7 @@ def search(arguments):
         return "Query is empty."
     limit = min(max(int(arguments.get("limit", 5)), 1), 10)
     filters, params = [], [fts]
-    for field in ("pack_id", "kind", "language", "configuration_set"):
+    for field in ("pack_id", "repository", "module", "kind", "language", "configuration_set"):
         if arguments.get(field):
             filters.append(field + " = ?")
             params.append(arguments[field])
@@ -72,6 +72,28 @@ def source(arguments):
     if not rows:
         return "Source not found: %s" % source_id
     return "\n\n---\n\n".join("### %s\nsource: `%s`\npath: `%s` · %s · %s\n\n%s" % (row["title"], row["source_id"], row["path"], row["language"], row["commit_sha"][:12], row["content"]) for row in rows)
+
+
+def repositories():
+    con = db()
+    if not con:
+        return "Knowledge pack is not installed."
+    rows = con.execute(
+        "SELECT repository, count(*) AS chunks, "
+        "sum(kind = 'source') AS source_chunks, sum(kind = 'example') AS example_chunks, "
+        "sum(kind = 'docs') AS docs_chunks, sum(kind = 'configuration') AS config_chunks, "
+        "count(DISTINCT module) AS modules, max(commit_sha) AS commit_sha "
+        "FROM chunks GROUP BY repository ORDER BY repository"
+    ).fetchall()
+    con.close()
+    if not rows:
+        return "No repositories are indexed."
+    lines = ["# Indexed repositories", "", "Use `search_knowledge` with `repository` and optional `module` to search one application.", ""]
+    for row in rows:
+        lines.append("- `%s`: %d chunks (%d source, %d examples, %d docs, %d config), %d modules, commit %s" % (
+            row["repository"], row["chunks"], row["source_chunks"], row["example_chunks"], row["docs_chunks"], row["config_chunks"], row["modules"], row["commit_sha"][:12]
+        ))
+    return "\n".join(lines)
 
 
 def resolve_config(arguments):
@@ -120,11 +142,12 @@ def resolve_config(arguments):
 @app.list_tools()
 async def list_tools():
     return [
-        types.Tool(name="search_knowledge", description="Search local indexed libraries, applications, documentation, examples, source code and configuration. Use this before answering a library/API question.", inputSchema={"type": "object", "properties": {"query": {"type": "string"}, "pack_id": {"type": "string"}, "kind": {"type": "string", "enum": ["docs", "example", "source", "configuration"]}, "language": {"type": "string"}, "configuration_set": {"type": "string"}, "limit": {"type": "integer", "default": 5}}, "required": ["query"]}),
+        types.Tool(name="search_knowledge", description="Search local indexed libraries, applications, documentation, examples, source code and configuration. Use this before answering a library/API question.", inputSchema={"type": "object", "properties": {"query": {"type": "string"}, "pack_id": {"type": "string"}, "repository": {"type": "string", "description": "Optional Git repository name; use list_repositories first"}, "module": {"type": "string", "description": "Optional Gradle module, for example :api"}, "kind": {"type": "string", "enum": ["docs", "example", "source", "configuration"]}, "language": {"type": "string"}, "configuration_set": {"type": "string"}, "limit": {"type": "integer", "default": 5}}, "required": ["query"]}),
         types.Tool(name="search_config", description="Search raw local configuration values. Specify configuration_set when central configuration has multiple variants.", inputSchema={"type": "object", "properties": {"query": {"type": "string"}, "configuration_set": {"type": "string"}, "limit": {"type": "integer", "default": 5}}, "required": ["query"]}),
         types.Tool(name="resolve_config", description="Resolve YAML leaf values for one application and central configuration set. Result includes exact source provenance. Default order is central base → module base → central profile → module profile; verify it against the application's Spring config-import order.", inputSchema={"type": "object", "properties": {"application": {"type": "string", "description": "Application repository name"}, "module": {"type": "string", "description": "Optional Gradle module, for example :app"}, "configuration_set": {"type": "string", "description": "Central configuration variant folder"}, "profile": {"type": "string", "description": "Optional Spring profile"}}, "required": ["application", "configuration_set"]}),
         types.Tool(name="get_source", description="Read the complete indexed chunk(s) after search_knowledge returned a source id.", inputSchema={"type": "object", "properties": {"source_id": {"type": "string"}}, "required": ["source_id"]}),
         types.Tool(name="list_libraries", description="List local generated catalog entries and their capabilities.", inputSchema={"type": "object", "properties": {}}),
+        types.Tool(name="list_repositories", description="List all indexed Git repositories, including applications, with chunk counts and discovered Gradle modules.", inputSchema={"type": "object", "properties": {}}),
         types.Tool(name="index_status", description="Show the last local ingestion audit summary.", inputSchema={"type": "object", "properties": {}}),
     ]
 
@@ -141,6 +164,8 @@ async def call_tool(name, arguments):
         return text(source(arguments))
     if name == "list_libraries":
         return text(CATALOG_PATH.read_text(encoding="utf-8") if CATALOG_PATH.exists() else "Catalog has not been generated yet.")
+    if name == "list_repositories":
+        return text(repositories())
     if name == "index_status":
         return text(AUDIT_PATH.read_text(encoding="utf-8") if AUDIT_PATH.exists() else "No local index run found.")
     return text("Unknown tool: %s" % name)
