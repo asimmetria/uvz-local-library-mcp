@@ -47,6 +47,11 @@ independently, use a root `kind: library-suite` card as a map and create one
 links to child contexts; it must not combine their entrypoints and examples
 into one ambiguous API contract.
 
+DDL, grants, test fixtures and auto-configuration modules are consumable
+`kind: support-module` entries when clients use them to provision integration
+tests or environments. Give each one its own context card and a usage example
+that states the scope and invocation; do not hide it as an internal module.
+
 ### `docs/usage/*.md`
 
 Each document is a short, reviewed golden path: dependency, imports, minimal
