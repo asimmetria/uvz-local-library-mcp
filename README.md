@@ -33,55 +33,63 @@ runs `--workspace`; обычному developer с готовым pack он не 
 проверяется при любой установке.
 MCP SDK требует Python 3.10+; Python 3.13 на рабочем компьютере подходит.
 
-## Первый работающий компонент
+## Первая установка и индексация (maintainer)
 
-`catalog_generator.py` строит local skill catalog из manifest без доступа к
-исходному коду. Это разделяет repository/module и смысловую knowledge entry:
+Этот сценарий запускает только человек, который выпускает общий knowledge pack.
+Все repositories, которые нужно проиндексировать, включая `jimmer`,
+`jimmer-docs`, `jimmer-examples`, application repositories и вложенные library
+modules, должны быть отдельными Git directories внутри одной workspace-папки.
 
-```bash
-python3 catalog_generator.py examples/manifest.example.json \
-  --output /tmp/generated-catalog.md
-```
-
-## Первый vertical slice
-
-Собрать pack из public Jimmer sources:
+На рабочем компьютере workspace уже определён:
 
 ```bash
-python3 knowledge_indexer.py --pack jimmer \
-  --source /path/to/jimmer-docs \
-  --source /path/to/jimmer-examples
+PROJECTS=/home/work/21498149@sigma.sbrf.ru/projects
+cd "$PROJECTS"
+git clone git@github.com:asimmetria/uvz-local-library-mcp.git
+cd uvz-local-library-mcp
+
+./install.sh \
+  --workspace "$PROJECTS" \
+  --sync \
+  --configuration-root "$PROJECTS/uvz-config"
 ```
 
-Проверить, что в docs не осталась навигационная HTML-разметка, generated-code
-не попал в index, а примеры реально находятся FTS-запросом:
+`--workspace` сам находит **каждый Git repository** под `$PROJECTS` и передаёт
+его в indexer один раз. Поэтому `jimmer-docs` отдельно указывать не нужно: если
+он лежит рядом с остальными projects, он уже войдёт в pack.
+
+`--configuration-root` не добавляет repository повторно. Он лишь сообщает, что
+`uvz-config` — central configuration source: его вложенные папки становятся
+отдельными `configuration_set` для `resolve_config`.
+
+`--sync` для чистых checkout-ов делает `fetch`, переключается на `master` и
+выполняет `pull --ff-only`. Repository с локальными commits/изменениями или без
+ветки `master` не изменяется; причина записывается в audit.
+
+После успешной сборки можно выполнить необязательную проверку качества:
 
 ```bash
-python3 verify_index.py --db knowledge.db --expect fetcher --expect association
+python3 verify_index.py --db knowledge.db --expect fetcher
 ```
 
-Установить MCP и одновременно собрать pack из Git repositories под текущей
-workspace-папкой:
-
-```bash
-./install.sh --workspace . --sync \
-  --configuration-root ./uvz-config
-```
-
-`--sync` изменяет только чистые Git checkout-ы и использует `pull --ff-only`.
-Без него installer индексирует текущие локальные файлы без fetch/pull.
-
-После успешного audit maintainer собирает переносимый pack:
+Затем maintainer публикует готовый pack:
 
 ```bash
 python3 package_pack.py --version 2026.07.22
 ```
 
-Developer без исходных repositories устанавливает опубликованный artifact:
+## Установка готового pack (обычный developer)
+
+Разработчик не клонирует projects и не запускает индексацию. Он скачивает
+репозиторий MCP и опубликованный архив pack, затем выполняет:
 
 ```bash
+cd uvz-local-library-mcp
 ./install.sh --knowledge-pack /path/to/knowledge-pack-2026.07.22.zip
 ```
+
+Installer ставит локальный stdio MCP и generic skill. После перезапуска
+GigaCode агент использует готовую SQLite-базу.
 
 Для YAML доступны два разных инструмента: `search_config` показывает исходные
 файлы, а `resolve_config` собирает leaf-values для `application`,
