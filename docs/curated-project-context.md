@@ -1,4 +1,4 @@
-# Curated library context: decision record
+# Curated project context: decision record
 
 ## Problem
 
@@ -13,7 +13,7 @@ Keep raw source indexing, but add a small curated layer maintained next to the
 source of each important library or application:
 
 ```text
-library-context.yaml
+project-context.yaml
 docs/usage/*.md
 README.md
 ```
@@ -21,7 +21,7 @@ README.md
 `README.md` remains human-facing and optional for RAG routing. The contract is
 the other two paths.
 
-### `library-context.yaml`
+### `project-context.yaml`
 
 It is a concise, structured card with at least:
 

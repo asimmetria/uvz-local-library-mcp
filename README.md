@@ -27,7 +27,7 @@ Jimmer, внутренним backend/frontend-библиотекам, конфи
 [source-sync.md](docs/source-sync.md) and
 [product-flow.md](docs/product-flow.md),
 [configuration-model.md](docs/configuration-model.md) and
-[curated-library-context.md](docs/curated-library-context.md).
+[curated-project-context.md](docs/curated-project-context.md).
 
 `PyYAML` is installed into the maintainer's virtual environment only when it
 runs `--workspace`; обычному developer с готовым pack он не нужен. Runtime MCP
