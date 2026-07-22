@@ -233,6 +233,12 @@ def flatten_yaml(value, prefix=""):
         yield prefix, value
 
 
+def json_value(value):
+    """Keep YAML timestamps and other scalar extensions representable in SQLite."""
+    isoformat = getattr(value, "isoformat", None)
+    return isoformat() if callable(isoformat) else str(value)
+
+
 def index_configuration_values(con, *, text, source_id, pack, repository, module, path, config_set):
     if yaml is None:
         return 0
@@ -251,7 +257,7 @@ def index_configuration_values(con, *, text, source_id, pack, repository, module
                     continue
                 con.execute(
                     "INSERT INTO configuration_values VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (source_id, pack, repository, module, path.as_posix(), config_set, profile, layer, key_path, json.dumps(value, ensure_ascii=False, sort_keys=True)),
+                    (source_id, pack, repository, module, path.as_posix(), config_set, profile, layer, key_path, json.dumps(value, ensure_ascii=False, sort_keys=True, default=json_value)),
                 )
                 inserted += 1
     return inserted
