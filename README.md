@@ -43,7 +43,7 @@ modules, должны быть отдельными Git directories внутри
 На рабочем компьютере workspace уже определён:
 
 ```bash
-PROJECTS=/home/work/21498149@sigma.sbrf.ru/projects
+PROJECTS=/path/to/projects
 cd "$PROJECTS"
 git clone git@github.com:asimmetria/uvz-local-library-mcp.git
 cd uvz-local-library-mcp
