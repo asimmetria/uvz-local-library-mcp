@@ -69,9 +69,10 @@ Installer сначала использует `$GIGACODE_HOME/.venv/bin/python`,
 `uvz-config` — central configuration source: его вложенные папки становятся
 отдельными `configuration_set` для `resolve_config`.
 
-`--sync` для чистых checkout-ов делает `fetch`, переключается на `master` и
-выполняет `pull --ff-only`. Repository с локальными commits/изменениями или без
-ветки `master` не изменяется; причина записывается в audit.
+`--sync` для чистых checkout-ов делает `fetch`, определяет основную ветку из
+`origin/HEAD` (с запасными вариантами `master`, затем `main`), переключается на
+неё и выполняет `pull --ff-only`. Repository с локальными commits/изменениями
+не изменяется; причина записывается в audit.
 
 После успешной сборки можно выполнить необязательную проверку качества:
 

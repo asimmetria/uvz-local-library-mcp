@@ -46,6 +46,21 @@ def git(root, *command):
     return result.returncode, result.stdout.strip(), result.stderr.strip()
 
 
+def default_branch(root):
+    """Return the remote default branch, with safe common fallbacks."""
+    code, value, _ = git(root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+    if code == 0 and value.startswith("origin/"):
+        candidate = value.removeprefix("origin/")
+        code, _, _ = git(root, "rev-parse", "--verify", f"origin/{candidate}")
+        if code == 0:
+            return candidate
+    for candidate in ("master", "main"):
+        code, _, _ = git(root, "rev-parse", "--verify", f"origin/{candidate}")
+        if code == 0:
+            return candidate
+    return None
+
+
 def sync_source(root):
     code, status, _ = git(root, "status", "--porcelain")
     if code or status:
@@ -58,22 +73,30 @@ def sync_source(root):
     code, _, _ = git(root, "fetch", "origin", "--prune")
     if code:
         return "sync_failed_fetch"
-    code, _, _ = git(root, "rev-parse", "--verify", "master")
-    if code:
-        return "sync_skipped_no_master"
+    target_branch = default_branch(root)
+    if target_branch is None:
+        return "sync_skipped_no_default_branch"
+    remote_target = f"origin/{target_branch}"
+    code, _, _ = git(root, "show-ref", "--verify", "--quiet", f"refs/heads/{target_branch}")
+    target_exists_locally = code == 0
     # A clean feature branch can still contain valuable local commits. Do not
     # switch it away merely to refresh the knowledge pack.
-    if branch != "master":
-        code, local_only, _ = git(root, "rev-list", "master..HEAD")
+    if branch != target_branch:
+        base = target_branch if target_exists_locally else remote_target
+        code, local_only, _ = git(root, "rev-list", f"{base}..HEAD")
         if code or local_only:
             return "sync_skipped_branch_ahead"
-    code, counts, _ = git(root, "rev-list", "--left-right", "--count", "master...origin/master")
-    if code:
-        return "sync_failed_remote_master_check"
-    local_ahead, _ = counts.split()
-    if int(local_ahead):
-        return "sync_skipped_master_ahead"
-    for command in (("checkout", "master"), ("pull", "--ff-only", "origin", "master")):
+    if target_exists_locally:
+        code, counts, _ = git(root, "rev-list", "--left-right", "--count", f"{target_branch}...{remote_target}")
+        if code:
+            return "sync_failed_remote_default_branch_check"
+        local_ahead, _ = counts.split()
+        if int(local_ahead):
+            return "sync_skipped_default_branch_ahead"
+        checkout = ("checkout", target_branch)
+    else:
+        checkout = ("checkout", "-b", target_branch, "--track", remote_target)
+    for command in (checkout, ("pull", "--ff-only", "origin", target_branch)):
         code, _, _ = git(root, *command)
         if code:
             return "sync_failed"

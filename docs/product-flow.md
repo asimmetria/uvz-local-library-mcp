@@ -14,8 +14,8 @@ library-knowledge-mcp build --workspace /path/to/projects
 The command:
 
 1. discovers configured Git roots and Gradle modules under the workspace;
-2. safely updates each source to its configured branch (`master` by default)
-   using `fetch` + `pull --ff-only`;
+2. safely updates each source to its remote default branch (`origin/HEAD`, then
+   `master`/`main`) using `fetch` + `pull --ff-only`;
 3. runs extraction, audit and retrieval evaluation;
 4. generates `knowledge.db` and `generated-catalog.md` from the same commit
    set;
