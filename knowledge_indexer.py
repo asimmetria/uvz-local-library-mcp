@@ -280,13 +280,19 @@ def main():
     options = args()
     con, audit, catalog = init_db(options.db), Counter(), []
     configuration_roots = {path.resolve() for path in options.configuration_root}
-    for root in options.source:
+    total_sources = len(options.source)
+    for source_number, root in enumerate(options.source, 1):
         root = root.resolve()
         if not root.is_dir():
             raise SystemExit("Source does not exist: %s" % root)
         audit["sources"] += 1
-        audit[sync_source(root) if options.sync else "sync_not_requested"] += 1
+        sync_status = sync_source(root) if options.sync else "sync_not_requested"
+        audit[sync_status] += 1
         sha, repo, modules = commit(root), root.name, discover_modules(root)
+        files_before = audit["files_seen"]
+        chunks_before = audit["chunks_indexed"]
+        values_before = audit["configuration_values_indexed"]
+        print("[%d/%d] %s: %s" % (source_number, total_sources, repo, sync_status), flush=True)
         audit["gradle_modules_discovered"] += len(modules)
         if options.pack == "jimmer":
             catalog.append({"id": repo, "type": "library", "status": "ready", "aliases": [repo.replace("-", " ")], "sources": [repo + ":"], "capabilities": ["docs", "examples", "api"]})
@@ -320,6 +326,12 @@ def main():
                 source_id = "%s#%d" % (source_base, position)
                 con.execute("INSERT INTO chunks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (source_id, options.pack, repo, module, rel, kind, language, config_set, sha, 1, len(chunk.splitlines()), title_for(path, chunk), chunk))
                 audit["chunks_indexed"] += 1
+        print("[%d/%d] %s: done — %d files, %d chunks, %d YAML values" % (
+            source_number, total_sources, repo,
+            audit["files_seen"] - files_before,
+            audit["chunks_indexed"] - chunks_before,
+            audit["configuration_values_indexed"] - values_before,
+        ), flush=True)
     con.commit()
     con.close()
     options.catalog.parent.mkdir(parents=True, exist_ok=True)
