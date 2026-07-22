@@ -84,13 +84,14 @@ Indexer может предлагать candidates: published Gradle modules, mo
 | `-adapter` | high-confidence `library` |
 | `-model-shared` | high-confidence `library` |
 | `-facade` | high-confidence `library` |
-| `-lib` | `library-suite`: контейнер, который нужно раскрыть по child modules |
+| `-lib` | `library-suite`: все child Gradle modules автоматически считаются libraries |
 
 High-confidence entries могут автоматически попасть в generated catalog со
 статусом `discovered`; владелец меняет его на `ready` после audit. Эвристика
 работает одинаково для Java и Kotlin. Для `-lib` не надо выдавать один
-безликий результат: если внутри найдены `facade` и `model-shared`, они
-становятся самостоятельными catalog entries, а `-lib` остаётся группой.
+безликий результат: сам контейнер остаётся группой, а каждый Gradle module
+внутри него становится самостоятельной library entry — даже без известного
+суффикса.
 
 Нейминг оценивается по имени Gradle module и его directory path, а не только
 по имени Git repository. Например, `applications/foo/:foo-facade` должен быть

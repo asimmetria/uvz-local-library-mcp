@@ -22,6 +22,7 @@ SKIP_DIRS = {".git", ".gradle", ".idea", "build", "dist", "node_modules", "targe
 CODE_EXTENSIONS = {".java": "java", ".kt": "kotlin", ".kts": "kotlin", ".ts": "typescript", ".tsx": "typescript", ".js": "javascript", ".jsx": "javascript", ".vue": "vue"}
 TEXT_EXTENSIONS = {".md": "markdown", ".mdx": "markdown", ".html": "html", ".htm": "html", ".yaml": "yaml", ".yml": "yaml", ".toml": "toml", ".properties": "properties"}
 LIBRARY_SUFFIXES = ("-adapter", "-model-shared", "-facade")
+LIBRARY_CONTAINER_SUFFIX = "-lib"
 SECRET_NAME = r"(?:password|secret|token|private[-_]?key|credential|api[-_]?key)"
 SECRET_KEY = re.compile(r"(?im)^(\s*" + SECRET_NAME + r"\s*[:=]).*$")
 SECRET_BLOCK_START = re.compile(r"(?i)^(\s*)" + SECRET_NAME + r"\s*:\s*[>|]")
@@ -181,6 +182,18 @@ def module_for(path, modules):
     return modules[directory]
 
 
+def is_library_module(module_path, module_id, modules):
+    """Recognize direct library modules and every child of a *-lib suite."""
+    if module_id != ":" and module_path.name.endswith(LIBRARY_SUFFIXES):
+        return True
+    parent = module_path.parent
+    while parent in modules:
+        if parent.name.endswith(LIBRARY_CONTAINER_SUFFIX):
+            return True
+        parent = parent.parent
+    return False
+
+
 def configuration_set(root, path, configuration_roots):
     if root not in configuration_roots:
         return ""
@@ -279,7 +292,7 @@ def main():
             catalog.append({"id": repo, "type": "library", "status": "ready", "aliases": [repo.replace("-", " ")], "sources": [repo + ":"], "capabilities": ["docs", "examples", "api"]})
         for module_path, module_id in modules.items():
             module_name = module_path.name
-            if module_name.endswith(LIBRARY_SUFFIXES):
+            if is_library_module(module_path, module_id, modules):
                 catalog.append({"id": repo + module_id.replace(":", "-"), "type": "library", "status": "discovered", "aliases": [module_name.replace("-", " ")], "sources": [repo + module_id], "capabilities": ["api", "examples"]})
         for path, language in walk(root):
             audit["files_seen"] += 1
