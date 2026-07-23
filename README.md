@@ -78,6 +78,13 @@ Installer сначала использует `$GIGACODE_HOME/.venv/bin/python`,
 неё и выполняет `pull --ff-only`. Repository с локальными commits/изменениями
 не изменяется; причина записывается в audit.
 
+Чтобы не индексировать отдельные repositories, создай рядом с `install.sh`
+локальный `index-exclude.txt`: по одному **точному имени Git-директории** на
+строку, комментарии начинаются с `#`. Файл ignored Git и автоматически
+применяется при `--workspace`; итоговый audit содержит `sources_excluded`.
+Шаблон: `index-exclude.example.txt`. Для другого расположения используй
+`--exclude-file /path/to/list.txt` или переменную `INDEX_EXCLUDE_FILE`.
+
 После успешной сборки можно выполнить необязательную проверку качества:
 
 ```bash

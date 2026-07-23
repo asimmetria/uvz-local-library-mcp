@@ -34,6 +34,7 @@ WORKSPACE=""
 SYNC=0
 CONFIGURATION_ROOTS=()
 KNOWLEDGE_PACK=""
+EXCLUDE_FILE="${INDEX_EXCLUDE_FILE:-$SCRIPT_DIR/index-exclude.txt}"
 
 "$SYS_PYTHON" -c 'import sys; sys.exit("local-library-mcp requires Python 3.9 or newer; found %s" % sys.version.split()[0]) if sys.version_info < (3, 9) else None'
 
@@ -42,8 +43,9 @@ while [ "$#" -gt 0 ]; do
     --workspace) WORKSPACE="$2"; shift 2 ;;
     --sync) SYNC=1; shift ;;
     --configuration-root) CONFIGURATION_ROOTS+=("$2"); shift 2 ;;
+    --exclude-file) EXCLUDE_FILE="$2"; shift 2 ;;
     --knowledge-pack) KNOWLEDGE_PACK="$2"; shift 2 ;;
-    *) echo "Usage: $0 [--workspace /path/to/projects] [--sync] [--configuration-root /path/to/config] [--knowledge-pack /path/to/pack.zip]"; exit 2 ;;
+    *) echo "Usage: $0 [--workspace /path/to/projects] [--sync] [--configuration-root /path/to/config] [--exclude-file /path/to/index-exclude.txt] [--knowledge-pack /path/to/pack.zip]"; exit 2 ;;
   esac
 done
 
@@ -111,6 +113,7 @@ if [ -n "$WORKSPACE" ]; then
   BUILD_ARGS=("$SCRIPT_DIR/build_workspace.py" "$WORKSPACE")
   [ "$SYNC" = "1" ] && BUILD_ARGS+=(--sync)
   for root in "${CONFIGURATION_ROOTS[@]}"; do BUILD_ARGS+=(--configuration-root "$root"); done
+  [ -f "$EXCLUDE_FILE" ] && BUILD_ARGS+=(--exclude-file "$EXCLUDE_FILE")
   run_python "${BUILD_ARGS[@]}"
 fi
 

@@ -1,0 +1,5 @@
+# Exact Git root directory names to omit from a workspace index.
+# Copy this file to index-exclude.txt and add one directory name per line.
+# Comments and blank lines are ignored.
+#
+# example-internal-project

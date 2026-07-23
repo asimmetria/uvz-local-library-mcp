@@ -5,3 +5,4 @@ skill/generated-catalog.md
 audit-summary.json
 .venv/
 dist/
+index-exclude.txt

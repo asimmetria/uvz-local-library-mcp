@@ -38,6 +38,7 @@ def args():
     parser.add_argument("--audit", type=Path, default=Path("audit-summary.json"))
     parser.add_argument("--sync", action="store_true", help="Safely update clean Git roots before indexing")
     parser.add_argument("--configuration-root", action="append", type=Path, default=[], help="Central configuration repository; repeatable")
+    parser.add_argument("--excluded-source", action="append", default=[], help="Repository omitted by workspace discovery; repeatable")
     return parser.parse_args()
 
 
@@ -375,7 +376,7 @@ def main():
     for item in sorted(catalog, key=lambda value: value["id"]):
         lines += ["## %s [%s, %s]" % (item["id"], item["type"], item["status"]), "- aliases: %s" % ", ".join(item["aliases"]), "- sources: %s" % ", ".join(item["sources"]), "- capabilities: %s" % ", ".join(item["capabilities"]), ""]
     options.catalog.write_text("\n".join(lines), encoding="utf-8")
-    report = {"pack": options.pack, "built_at": datetime.now(timezone.utc).isoformat(), **audit, "database": str(options.db), "catalog": str(options.catalog)}
+    report = {"pack": options.pack, "built_at": datetime.now(timezone.utc).isoformat(), **audit, "sources_excluded": options.excluded_source, "database": str(options.db), "catalog": str(options.catalog)}
     options.audit.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
