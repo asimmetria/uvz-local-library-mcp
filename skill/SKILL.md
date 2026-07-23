@@ -18,3 +18,8 @@ description: "Use for questions about internal libraries, facades, shared models
    value, call `resolve_config` with application, configuration_set and the
    relevant profile/module. Do not claim an effective value without its
    provenance and the reported merge order.
+6. Before adding or documenting an internal Gradle dependency, call
+   `suggest_dependency`. Use its `libs.<alias>` declaration and do not write a
+   direct `group:name:version` dependency when `uvz-platform` provides an
+   alias. State the catalog prerequisite if the consumer project has not yet
+   imported it.

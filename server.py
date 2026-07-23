@@ -92,6 +92,63 @@ def repositories():
     return "\n".join(lines)
 
 
+def dependency_suggestion(arguments):
+    """Resolve a Gradle version-catalog alias from the indexed uvz-platform."""
+    con = db()
+    if not con:
+        return "Knowledge pack is not installed."
+    requested = arguments.get("query", "")
+    terms = re.findall(r"[\w-]+", requested.lower(), flags=re.UNICODE)
+    if not terms:
+        con.close()
+        return "Specify a library name, artifact, or catalog alias."
+    scope = arguments.get("scope", "implementation")
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", scope):
+        con.close()
+        return "Invalid Gradle scope."
+    rows = con.execute(
+        "SELECT source_id, path, commit_sha, content FROM chunks "
+        "WHERE repository = 'uvz-platform' AND path LIKE '%libs.versions.toml' "
+        "ORDER BY source_id"
+    ).fetchall()
+    matches = []
+    for row in rows:
+        for line in row["content"].splitlines():
+            match = re.match(r"\s*([A-Za-z0-9_.-]+)\s*=\s*\{", line)
+            if match and all(term in line.lower() for term in terms):
+                matches.append((match.group(1), line.strip(), row))
+    if not matches:
+        con.close()
+        return "No matching alias was found in uvz-platform. Do not add a direct version; use search_knowledge to inspect the library and ask the platform owner to add or confirm an alias."
+    output = ["# Dependency suggestion", ""]
+    seen = set()
+    for alias, line, row in matches:
+        if alias in seen:
+            continue
+        seen.add(alias)
+        accessor = re.sub(r"[-_.]+", ".", alias)
+        output.extend([
+            "- alias: `libs.%s`" % accessor,
+            "- declaration: `%s(libs.%s)`" % (scope, accessor),
+            "- catalog: `%s` · commit `%s`" % (row["path"], row["commit_sha"][:12]),
+            "- catalog entry: `%s`" % line,
+        ])
+        example_rows = con.execute(
+            "SELECT repository, path FROM chunks "
+            "WHERE repository != 'uvz-platform' AND path LIKE '%build.gradle.kts' "
+            "AND content LIKE ? ORDER BY repository, path LIMIT 3",
+            ("%%libs.%s%%" % accessor,),
+        ).fetchall()
+        if example_rows:
+            output.append("- indexed examples: " + ", ".join("`%s:%s`" % (example["repository"], example["path"]) for example in example_rows))
+        output.extend([
+            "- prerequisite: the consumer project must import the `uvz-platform` version catalog as `libs`.",
+            "",
+        ])
+    con.close()
+    return "\n".join(output).rstrip()
+
+
 def resolve_config(arguments):
     con = db()
     if not con:
@@ -138,6 +195,7 @@ def resolve_config(arguments):
 TOOLS = [
     {"name": "search_knowledge", "description": "Search local indexed libraries, applications, documentation, examples, source code and configuration. Use this before answering a library/API question.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "pack_id": {"type": "string"}, "repository": {"type": "string", "description": "Optional Git repository name; use list_repositories first"}, "module": {"type": "string", "description": "Optional Gradle module, for example :api"}, "kind": {"type": "string", "enum": ["docs", "example", "source", "configuration"]}, "language": {"type": "string"}, "configuration_set": {"type": "string"}, "limit": {"type": "integer", "default": 5}}, "required": ["query"]}},
     {"name": "search_config", "description": "Search raw local configuration values. Specify configuration_set when central configuration has multiple variants.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "configuration_set": {"type": "string"}, "limit": {"type": "integer", "default": 5}}, "required": ["query"]}},
+    {"name": "suggest_dependency", "description": "ALWAYS call before adding an internal Gradle dependency. Resolves a uvz-platform version-catalog alias and returns the correct libs alias declaration without a direct version.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string", "description": "Library name, artifact, or alias fragment, for example sbertone adapter"}, "scope": {"type": "string", "default": "implementation", "description": "Gradle configuration, for example implementation, api, testImplementation"}}, "required": ["query"]}},
     {"name": "resolve_config", "description": "Resolve YAML leaf values for one application and central configuration set. Result includes exact source provenance. Default order is central base → module base → central profile → module profile; verify it against the application's Spring config-import order.", "inputSchema": {"type": "object", "properties": {"application": {"type": "string", "description": "Application repository name"}, "module": {"type": "string", "description": "Optional Gradle module, for example :api"}, "configuration_set": {"type": "string", "description": "Central configuration variant folder"}, "profile": {"type": "string", "description": "Optional Spring profile"}}, "required": ["application", "configuration_set"]}},
     {"name": "get_source", "description": "Read the complete indexed chunk(s) after search_knowledge returned a source id.", "inputSchema": {"type": "object", "properties": {"source_id": {"type": "string"}}, "required": ["source_id"]}},
     {"name": "list_libraries", "description": "List local generated catalog entries and their capabilities.", "inputSchema": {"type": "object", "properties": {}}},
@@ -151,6 +209,8 @@ def call_tool(name, arguments):
         return text(search(arguments))
     if name == "search_config":
         return text(search({**arguments, "kind": "configuration"}))
+    if name == "suggest_dependency":
+        return text(dependency_suggestion(arguments))
     if name == "resolve_config":
         return text(resolve_config(arguments))
     if name == "get_source":
