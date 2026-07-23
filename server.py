@@ -1,20 +1,16 @@
-"""Local stdio MCP server over the generated SQLite FTS5 knowledge pack."""
+"""Dependency-free local stdio MCP server over the generated SQLite FTS5 pack."""
 
 import json
 import re
 import sqlite3
+import sys
 from pathlib import Path
-
-import mcp.server.stdio
-import mcp.types as types
-from mcp.server import Server
 
 
 BASE = Path(__file__).parent
 DB_PATH = BASE / "knowledge.db"
 CATALOG_PATH = BASE / "skill" / "generated-catalog.md"
 AUDIT_PATH = BASE / "audit-summary.json"
-app = Server("local-library-mcp")
 
 
 def db():
@@ -30,7 +26,7 @@ def query(value):
 
 
 def text(value):
-    return [types.TextContent(type="text", text=value)]
+    return [{"type": "text", "text": value}]
 
 
 def search(arguments):
@@ -139,21 +135,18 @@ def resolve_config(arguments):
     return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
 
 
-@app.list_tools()
-async def list_tools():
-    return [
-        types.Tool(name="search_knowledge", description="Search local indexed libraries, applications, documentation, examples, source code and configuration. Use this before answering a library/API question.", inputSchema={"type": "object", "properties": {"query": {"type": "string"}, "pack_id": {"type": "string"}, "repository": {"type": "string", "description": "Optional Git repository name; use list_repositories first"}, "module": {"type": "string", "description": "Optional Gradle module, for example :api"}, "kind": {"type": "string", "enum": ["docs", "example", "source", "configuration"]}, "language": {"type": "string"}, "configuration_set": {"type": "string"}, "limit": {"type": "integer", "default": 5}}, "required": ["query"]}),
-        types.Tool(name="search_config", description="Search raw local configuration values. Specify configuration_set when central configuration has multiple variants.", inputSchema={"type": "object", "properties": {"query": {"type": "string"}, "configuration_set": {"type": "string"}, "limit": {"type": "integer", "default": 5}}, "required": ["query"]}),
-        types.Tool(name="resolve_config", description="Resolve YAML leaf values for one application and central configuration set. Result includes exact source provenance. Default order is central base → module base → central profile → module profile; verify it against the application's Spring config-import order.", inputSchema={"type": "object", "properties": {"application": {"type": "string", "description": "Application repository name"}, "module": {"type": "string", "description": "Optional Gradle module, for example :app"}, "configuration_set": {"type": "string", "description": "Central configuration variant folder"}, "profile": {"type": "string", "description": "Optional Spring profile"}}, "required": ["application", "configuration_set"]}),
-        types.Tool(name="get_source", description="Read the complete indexed chunk(s) after search_knowledge returned a source id.", inputSchema={"type": "object", "properties": {"source_id": {"type": "string"}}, "required": ["source_id"]}),
-        types.Tool(name="list_libraries", description="List local generated catalog entries and their capabilities.", inputSchema={"type": "object", "properties": {}}),
-        types.Tool(name="list_repositories", description="List all indexed Git repositories, including applications, with chunk counts and discovered Gradle modules.", inputSchema={"type": "object", "properties": {}}),
-        types.Tool(name="index_status", description="Show the last local ingestion audit summary.", inputSchema={"type": "object", "properties": {}}),
-    ]
+TOOLS = [
+    {"name": "search_knowledge", "description": "Search local indexed libraries, applications, documentation, examples, source code and configuration. Use this before answering a library/API question.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "pack_id": {"type": "string"}, "repository": {"type": "string", "description": "Optional Git repository name; use list_repositories first"}, "module": {"type": "string", "description": "Optional Gradle module, for example :api"}, "kind": {"type": "string", "enum": ["docs", "example", "source", "configuration"]}, "language": {"type": "string"}, "configuration_set": {"type": "string"}, "limit": {"type": "integer", "default": 5}}, "required": ["query"]}},
+    {"name": "search_config", "description": "Search raw local configuration values. Specify configuration_set when central configuration has multiple variants.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "configuration_set": {"type": "string"}, "limit": {"type": "integer", "default": 5}}, "required": ["query"]}},
+    {"name": "resolve_config", "description": "Resolve YAML leaf values for one application and central configuration set. Result includes exact source provenance. Default order is central base → module base → central profile → module profile; verify it against the application's Spring config-import order.", "inputSchema": {"type": "object", "properties": {"application": {"type": "string", "description": "Application repository name"}, "module": {"type": "string", "description": "Optional Gradle module, for example :api"}, "configuration_set": {"type": "string", "description": "Central configuration variant folder"}, "profile": {"type": "string", "description": "Optional Spring profile"}}, "required": ["application", "configuration_set"]}},
+    {"name": "get_source", "description": "Read the complete indexed chunk(s) after search_knowledge returned a source id.", "inputSchema": {"type": "object", "properties": {"source_id": {"type": "string"}}, "required": ["source_id"]}},
+    {"name": "list_libraries", "description": "List local generated catalog entries and their capabilities.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "list_repositories", "description": "List all indexed Git repositories, including applications, with chunk counts and discovered Gradle modules.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "index_status", "description": "Show the last local ingestion audit summary.", "inputSchema": {"type": "object", "properties": {}}},
+]
 
 
-@app.call_tool()
-async def call_tool(name, arguments):
+def call_tool(name, arguments):
     if name == "search_knowledge":
         return text(search(arguments))
     if name == "search_config":
@@ -171,11 +164,79 @@ async def call_tool(name, arguments):
     return text("Unknown tool: %s" % name)
 
 
-async def main():
-    async with mcp.server.stdio.stdio_server() as streams:
-        await app.run(streams[0], streams[1], app.create_initialization_options())
+MISSING = object()
+
+
+def result(request_id, value):
+    return {"jsonrpc": "2.0", "id": request_id, "result": value}
+
+
+def error(request_id, code, message):
+    return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
+
+
+def handle(message):
+    request_id = message.get("id", MISSING)
+    method = message.get("method")
+    params = message.get("params") or {}
+    if method == "initialize":
+        if request_id is MISSING:
+            return None
+        return result(request_id, {
+            "protocolVersion": params.get("protocolVersion", "2024-11-05"),
+            "capabilities": {"tools": {"listChanged": False}},
+            "serverInfo": {"name": "local-library-mcp", "version": "1.0.0"},
+        })
+    if method == "ping":
+        return None if request_id is MISSING else result(request_id, {})
+    if method == "tools/list":
+        return None if request_id is MISSING else result(request_id, {"tools": TOOLS})
+    if method == "tools/call":
+        if request_id is MISSING:
+            return None
+        name = params.get("name", "")
+        arguments = params.get("arguments") or {}
+        return result(request_id, {"content": call_tool(name, arguments)})
+    if request_id is MISSING:
+        return None
+    return error(request_id, -32601, "Method not found: %s" % method)
+
+
+def read_message():
+    first = sys.stdin.buffer.readline()
+    if not first:
+        return None
+    if first.lstrip().startswith(b"{"):
+        return json.loads(first)
+    headers = {}
+    line = first
+    while line not in (b"\n", b"\r\n", b""):
+        key, _, value = line.decode("ascii").partition(":")
+        headers[key.lower()] = value.strip()
+        line = sys.stdin.buffer.readline()
+    length = int(headers["content-length"])
+    return json.loads(sys.stdin.buffer.read(length))
+
+
+def write_message(payload):
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    sys.stdout.buffer.write(b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n\r\n" + body)
+    sys.stdout.buffer.flush()
+
+
+def main():
+    while True:
+        try:
+            message = read_message()
+            if message is None:
+                return
+            response = handle(message)
+            if response is not None:
+                write_message(response)
+        except Exception as exception:  # Never send tracebacks to the MCP protocol stream.
+            request_id = message.get("id") if "message" in locals() and isinstance(message, dict) else None
+            write_message(error(request_id, -32603, "Internal error: %s" % exception))
 
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    main()

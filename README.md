@@ -29,10 +29,10 @@ Jimmer, внутренним backend/frontend-библиотекам, конфи
 [configuration-model.md](docs/configuration-model.md) and
 [curated-project-context.md](docs/curated-project-context.md).
 
-`PyYAML` is installed into the maintainer's virtual environment only when it
-runs `--workspace`; обычному developer с готовым pack он не нужен. Runtime MCP
-проверяется при любой установке.
-MCP SDK требует Python 3.10+; Python 3.13 на рабочем компьютере подходит.
+`PyYAML` is installed only for maintainer runs with `--workspace`; обычному
+developer с готовым pack он не нужен. Runtime MCP использует только стандартную
+библиотеку Python, поэтому не требует Rust, Cargo или Xcode Command Line Tools.
+Python 3.9+ подходит.
 
 ## Первая установка и индексация (maintainer)
 

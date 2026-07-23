@@ -35,7 +35,7 @@ SYNC=0
 CONFIGURATION_ROOTS=()
 KNOWLEDGE_PACK=""
 
-"$SYS_PYTHON" -c 'import sys; sys.exit("local-library-mcp requires Python 3.10 or newer; found %s" % sys.version.split()[0]) if sys.version_info < (3, 10) else None'
+"$SYS_PYTHON" -c 'import sys; sys.exit("local-library-mcp requires Python 3.9 or newer; found %s" % sys.version.split()[0]) if sys.version_info < (3, 9) else None'
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -88,6 +88,9 @@ run_python() {
 }
 
 install_requirements() {
+  if ! grep -q '^[[:space:]]*[^#[:space:]]' "$1"; then
+    return
+  fi
   if [ -n "$PYTHONPATH_PREFIX" ]; then
     "$PYTHON" -m pip install --quiet --target "$PYTHONPATH_PREFIX" -r "$1"
   else
@@ -96,7 +99,11 @@ install_requirements() {
 }
 
 install_requirements "$SCRIPT_DIR/requirements.txt"
-run_python -c 'import mcp; print("Validated MCP runtime")'
+run_python - "$SCRIPT_DIR/server.py" <<'PY'
+import ast, pathlib, sys
+ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+print("Validated dependency-free MCP runtime")
+PY
 
 if [ -n "$WORKSPACE" ]; then
   install_requirements "$SCRIPT_DIR/requirements-indexer.txt"

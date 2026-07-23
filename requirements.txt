@@ -1,1 +1,1 @@
-mcp>=1.0.0
+# Runtime MCP server uses only Python standard library.
