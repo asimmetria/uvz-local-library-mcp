@@ -121,7 +121,7 @@ if [ -n "$KNOWLEDGE_PACK" ]; then
   run_python "$SCRIPT_DIR/install_pack.py" "$KNOWLEDGE_PACK" --destination "$SCRIPT_DIR"
 fi
 
-ln -sfn "$SCRIPT_DIR/skill" "$GIGACODE_HOME/skills/library-knowledge-workflow"
+ln -sfn "$SCRIPT_DIR/skills/library-knowledge-workflow" "$GIGACODE_HOME/skills/library-knowledge-workflow"
 
 SERVER_COMMAND="$PYTHON"
 if [ -n "$PYTHONPATH_PREFIX" ]; then

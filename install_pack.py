@@ -10,7 +10,7 @@ from pathlib import Path
 
 FILES = {
     "knowledge.db": "knowledge.db",
-    "generated-catalog.md": "skill/generated-catalog.md",
+    "generated-catalog.md": "skills/library-knowledge-workflow/generated-catalog.md",
     "evaluation-summary.json": "audit-summary.json",
 }
 

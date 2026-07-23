@@ -1,7 +1,7 @@
 # Local/private configuration and generated knowledge data
 manifest.local.json
 knowledge.db
-skill/generated-catalog.md
+skills/library-knowledge-workflow/generated-catalog.md
 audit-summary.json
 .venv/
 dist/

@@ -34,7 +34,7 @@ def args():
     parser.add_argument("--pack", required=True, help="Knowledge pack id, e.g. jimmer")
     parser.add_argument("--source", action="append", type=Path, required=True, help="Repository or source root; repeatable")
     parser.add_argument("--db", type=Path, default=Path("knowledge.db"))
-    parser.add_argument("--catalog", type=Path, default=Path("skill/generated-catalog.md"))
+    parser.add_argument("--catalog", type=Path, default=Path("skills/library-knowledge-workflow/generated-catalog.md"))
     parser.add_argument("--audit", type=Path, default=Path("audit-summary.json"))
     parser.add_argument("--sync", action="store_true", help="Safely update clean Git roots before indexing")
     parser.add_argument("--configuration-root", action="append", type=Path, default=[], help="Central configuration repository; repeatable")

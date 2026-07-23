@@ -16,7 +16,7 @@ def digest(path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", type=Path, default=Path("knowledge.db"))
-    parser.add_argument("--catalog", type=Path, default=Path("skill/generated-catalog.md"))
+    parser.add_argument("--catalog", type=Path, default=Path("skills/library-knowledge-workflow/generated-catalog.md"))
     parser.add_argument("--audit", type=Path, default=Path("audit-summary.json"))
     parser.add_argument("--version", required=True)
     parser.add_argument("--output", type=Path, default=Path("dist"))

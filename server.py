@@ -9,7 +9,7 @@ from pathlib import Path
 
 BASE = Path(__file__).parent
 DB_PATH = BASE / "knowledge.db"
-CATALOG_PATH = BASE / "skill" / "generated-catalog.md"
+CATALOG_PATH = BASE / "skills" / "library-knowledge-workflow" / "generated-catalog.md"
 AUDIT_PATH = BASE / "audit-summary.json"
 
 

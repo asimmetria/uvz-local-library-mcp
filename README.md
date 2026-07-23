@@ -113,6 +113,11 @@ cd uvz-local-library-mcp
 `dist/knowledge-pack-*.zip`. Он ставит локальный stdio MCP и generic skill.
 После перезапуска GigaCode агент использует готовую SQLite-базу.
 
+Все bundled skills лежат в одном каталоге `skills/`. Навык
+`skills/library-knowledge-workflow/` — часть обычной установки: `install.sh`
+автоматически создаёт для него симлинк
+`$GIGACODE_HOME/skills/library-knowledge-workflow`.
+
 ### Необязательный skill для подготовки документации
 
 `skills/project-context-authoring/` содержит personal skill для владельцев
