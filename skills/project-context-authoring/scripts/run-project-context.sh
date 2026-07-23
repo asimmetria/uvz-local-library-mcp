@@ -41,4 +41,4 @@ EOF
 )"
 
 cd "$PROJECT"
-exec gigacode --approval-mode auto-edit "$PROMPT"
+exec gigacode -p "$PROMPT" --approval-mode=auto-edit
