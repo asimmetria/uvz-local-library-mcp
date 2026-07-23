@@ -219,9 +219,10 @@ def read_message():
 
 
 def write_message(payload):
-    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    sys.stdout.buffer.write(b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n\r\n" + body)
-    sys.stdout.buffer.flush()
+    # GigaCode's stdio transport uses one JSON-RPC message per line, not the
+    # HTTP-style Content-Length framing used by some other MCP clients.
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
+    sys.stdout.flush()
 
 
 def main():
