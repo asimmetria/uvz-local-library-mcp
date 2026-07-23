@@ -64,29 +64,67 @@ fi
 mkdir -p "$GIGACODE_HOME" "$GIGACODE_HOME/skills"
 mkdir -p "$MCP_RUNTIME_HOME"
 VENV="$MCP_RUNTIME_HOME/.local-library-mcp-venv"
-if [ ! -x "$VENV/bin/python" ]; then
+if [ ! -x "$VENV/bin/python" ] && "$SYS_PYTHON" -c 'import ensurepip' >/dev/null 2>&1; then
   "$SYS_PYTHON" -m venv "$VENV"
 fi
-PYTHON="$VENV/bin/python"
-"$PYTHON" -m pip install --quiet -r "$SCRIPT_DIR/requirements.txt"
-"$PYTHON" -c 'import mcp; print("Validated MCP runtime")'
+PYTHONPATH_PREFIX=""
+if [ -x "$VENV/bin/python" ] && "$VENV/bin/python" -m pip --version >/dev/null 2>&1; then
+  PYTHON="$VENV/bin/python"
+else
+  # Debian corporate images can have Python and pip but omit python3-venv.
+  # Install dependencies in a project-local directory instead of requiring apt.
+  PYTHON="$SYS_PYTHON"
+  PYTHONPATH_PREFIX="$MCP_RUNTIME_HOME/.local-library-mcp-site-packages"
+  mkdir -p "$PYTHONPATH_PREFIX"
+  echo "Python venv is unavailable; using project-local pip packages"
+fi
+
+run_python() {
+  if [ -n "$PYTHONPATH_PREFIX" ]; then
+    PYTHONPATH="$PYTHONPATH_PREFIX${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON" "$@"
+  else
+    "$PYTHON" "$@"
+  fi
+}
+
+install_requirements() {
+  if [ -n "$PYTHONPATH_PREFIX" ]; then
+    "$PYTHON" -m pip install --quiet --target "$PYTHONPATH_PREFIX" -r "$1"
+  else
+    "$PYTHON" -m pip install --quiet -r "$1"
+  fi
+}
+
+install_requirements "$SCRIPT_DIR/requirements.txt"
+run_python -c 'import mcp; print("Validated MCP runtime")'
 
 if [ -n "$WORKSPACE" ]; then
-  "$PYTHON" -m pip install --quiet -r "$SCRIPT_DIR/requirements-indexer.txt"
-  "$PYTHON" -c 'import yaml; print("Validated YAML parser for index build")'
-  BUILD_ARGS=("$PYTHON" "$SCRIPT_DIR/build_workspace.py" "$WORKSPACE")
+  install_requirements "$SCRIPT_DIR/requirements-indexer.txt"
+  run_python -c 'import yaml; print("Validated YAML parser for index build")'
+  BUILD_ARGS=("$SCRIPT_DIR/build_workspace.py" "$WORKSPACE")
   [ "$SYNC" = "1" ] && BUILD_ARGS+=(--sync)
   for root in "${CONFIGURATION_ROOTS[@]}"; do BUILD_ARGS+=(--configuration-root "$root"); done
-  "${BUILD_ARGS[@]}"
+  run_python "${BUILD_ARGS[@]}"
 fi
 
 if [ -n "$KNOWLEDGE_PACK" ]; then
-  "$PYTHON" "$SCRIPT_DIR/install_pack.py" "$KNOWLEDGE_PACK" --destination "$SCRIPT_DIR"
+  run_python "$SCRIPT_DIR/install_pack.py" "$KNOWLEDGE_PACK" --destination "$SCRIPT_DIR"
 fi
 
 ln -sfn "$SCRIPT_DIR/skill" "$GIGACODE_HOME/skills/library-knowledge-workflow"
 
-"$PYTHON" - "$GIGACODE_HOME/settings.json" "$PYTHON" "$SCRIPT_DIR/server.py" <<'PY'
+SERVER_COMMAND="$PYTHON"
+if [ -n "$PYTHONPATH_PREFIX" ]; then
+  SERVER_COMMAND="$MCP_RUNTIME_HOME/local-library-mcp-python"
+  {
+    printf '%s\n' '#!/usr/bin/env bash'
+    printf 'export PYTHONPATH=%q${PYTHONPATH:+:$PYTHONPATH}\n' "$PYTHONPATH_PREFIX"
+    printf 'exec %q "$@"\n' "$PYTHON"
+  } > "$SERVER_COMMAND"
+  chmod +x "$SERVER_COMMAND"
+fi
+
+run_python - "$GIGACODE_HOME/settings.json" "$SERVER_COMMAND" "$SCRIPT_DIR/server.py" <<'PY'
 import json, sys
 from pathlib import Path
 path, python, server = map(Path, sys.argv[1:])

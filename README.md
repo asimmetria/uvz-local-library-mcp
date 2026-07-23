@@ -61,6 +61,9 @@ Installer сначала использует `$GIGACODE_HOME/.venv/bin/python`,
 При synthetic/non-writable `$HOME` installer ищет `.gigacode` в родительских
 папках проекта и хранит runtime в `.mcp-runtime` рядом с самим MCP-проектом.
 Пути можно переопределить через `GIGACODE_HOME` и `MCP_RUNTIME_HOME`.
+Если в корпоративном Python есть `pip`, но нет `python3-venv`, installer
+автоматически устанавливает зависимости в локальную `.mcp-runtime` через
+`pip --target`; права `sudo` и пакет `python3-venv` не нужны.
 
 `--workspace` сам находит **каждый Git repository** под `$PROJECTS` и передаёт
 его в indexer один раз. Поэтому `jimmer-docs` отдельно указывать не нужно: если
