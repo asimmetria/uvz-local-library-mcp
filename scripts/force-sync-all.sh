@@ -30,11 +30,15 @@ while IFS= read -r -d '' git_dir; do
     continue
   fi
 
-  # Clear the current checkout before switching branches: otherwise Git can
-  # refuse checkout when a dirty file would be overwritten by master/main.
-  git -C "$repository" reset --hard
+  # Remove untracked files first so they cannot block a forced checkout.
   git -C "$repository" clean -fd
-  git -C "$repository" checkout -f -B "$branch" "origin/$branch"
+  if git -C "$repository" show-ref --verify --quiet "refs/heads/$branch"; then
+    # checkout -f discards tracked worktree changes while switching, but does
+    # not reset the branch history yet.
+    git -C "$repository" checkout -f "$branch"
+  else
+    git -C "$repository" checkout -f --track -b "$branch" "origin/$branch"
+  fi
   git -C "$repository" reset --hard "origin/$branch"
   echo "OK: $branch → $(git -C "$repository" rev-parse --short HEAD)"
 done
