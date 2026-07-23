@@ -26,6 +26,20 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+# The private distribution repository may ship a versioned pack in dist/.
+# A normal developer should not need to locate or name it manually. Explicit
+# --knowledge-pack always wins; a maintainer --workspace build never consumes a
+# possibly stale bundled pack.
+if [ -z "$KNOWLEDGE_PACK" ] && [ -z "$WORKSPACE" ]; then
+  shopt -s nullglob
+  BUNDLED_PACKS=("$SCRIPT_DIR"/dist/knowledge-pack-*.zip)
+  shopt -u nullglob
+  if [ "${#BUNDLED_PACKS[@]}" -gt 0 ]; then
+    KNOWLEDGE_PACK="${BUNDLED_PACKS[${#BUNDLED_PACKS[@]} - 1]}"
+    echo "Using bundled knowledge pack: $(basename "$KNOWLEDGE_PACK")"
+  fi
+fi
+
 mkdir -p "$GIGACODE_HOME" "$GIGACODE_HOME/skills"
 mkdir -p "$MCP_RUNTIME_HOME"
 VENV="$MCP_RUNTIME_HOME/.local-library-mcp-venv"

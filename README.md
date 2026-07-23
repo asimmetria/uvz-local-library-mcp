@@ -86,18 +86,26 @@ python3 verify_index.py --db knowledge.db --expect fetcher
 python3 package_pack.py --version 2026.07.22
 ```
 
-## Установка готового pack (обычный developer)
+## Установка для разработчика
 
-Разработчик не клонирует projects и не запускает индексацию. Он скачивает
-репозиторий MCP и опубликованный архив pack, затем выполняет:
+Для команды рекомендуется один закрытый Bitbucket-репозиторий-дистрибутив:
+тот же код MCP и опубликованный `dist/knowledge-pack-<version>.zip` в нём.
+Разработчик не клонирует projects и не запускает индексацию:
 
 ```bash
+git clone <internal-bitbucket>/uvz-local-library-mcp.git
 cd uvz-local-library-mcp
-./install.sh --knowledge-pack /path/to/knowledge-pack-2026.07.22.zip
+./install.sh
 ```
 
-Installer ставит локальный stdio MCP и generic skill. После перезапуска
-GigaCode агент использует готовую SQLite-базу.
+Без `--workspace` и `--knowledge-pack` installer сам выберет самый новый
+`dist/knowledge-pack-*.zip`. Он ставит локальный stdio MCP и generic skill.
+После перезапуска GigaCode агент использует готовую SQLite-базу.
+
+Maintainer добавляет новый pack в закрытый repository явно (`git add -f
+dist/knowledge-pack-<version>.zip`), поскольку `dist/` намеренно ignored в
+публичном исходном repository. Если pack распространяется отдельно, его можно
+указать явно: `./install.sh --knowledge-pack /path/to/pack.zip`.
 
 Для YAML доступны два разных инструмента: `search_config` показывает исходные
 файлы, а `resolve_config` собирает leaf-values для `application`,
