@@ -117,10 +117,11 @@ cd uvz-local-library-mcp
 
 `skills/project-context-authoring/` содержит personal skill для владельцев
 библиотек: он создаёт `project-context.yaml` и `docs/usage`. Он намеренно не
-устанавливается автоматически обычным developer. Для ручной установки создай
-симлинк на эту папку в `$GIGACODE_HOME/skills/project-context-authoring`.
-Его scripts `list-gradle-projects.sh` и `run-project-context.sh` запускают
-GigaCode по одному выбранному репозиторию, а не по всему workspace.
+устанавливается автоматически обычным developer. Владелец подключает его
+вручную командой `./scripts/install-project-context-authoring.sh`; она создаёт
+симлинк в `$GIGACODE_HOME/skills/project-context-authoring`. Его scripts
+`list-gradle-projects.sh` и `run-project-context.sh` запускают GigaCode по
+одному выбранному репозиторию, а не по всему workspace.
 
 Maintainer добавляет новый pack в закрытый repository явно (`git add -f
 dist/knowledge-pack-<version>.zip`), поскольку `dist/` намеренно ignored в
