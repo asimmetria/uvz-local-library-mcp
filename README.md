@@ -113,6 +113,15 @@ cd uvz-local-library-mcp
 `dist/knowledge-pack-*.zip`. Он ставит локальный stdio MCP и generic skill.
 После перезапуска GigaCode агент использует готовую SQLite-базу.
 
+### Необязательный skill для подготовки документации
+
+`skills/project-context-authoring/` содержит personal skill для владельцев
+библиотек: он создаёт `project-context.yaml` и `docs/usage`. Он намеренно не
+устанавливается автоматически обычным developer. Для ручной установки создай
+симлинк на эту папку в `$GIGACODE_HOME/skills/project-context-authoring`.
+Его scripts `list-gradle-projects.sh` и `run-project-context.sh` запускают
+GigaCode по одному выбранному репозиторию, а не по всему workspace.
+
 Maintainer добавляет новый pack в закрытый repository явно (`git add -f
 dist/knowledge-pack-<version>.zip`), поскольку `dist/` намеренно ignored в
 публичном исходном repository. Если pack распространяется отдельно, его можно

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Project Context Authoring"
+  short_description: "Create application and library context"
+  default_prompt: "Use $project-context-authoring to document this project for the local library RAG."
