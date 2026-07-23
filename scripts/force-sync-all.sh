@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Reset every Git repository under a workspace to origin/master, with main fallback.
-# WARNING: --apply discards uncommitted tracked/untracked changes and resets the target branch.
+# WARNING: --apply discards uncommitted tracked changes and resets the target branch.
 set -Eeuo pipefail
 
 WORKSPACE="${1:?Usage: $0 /path/to/projects [--apply]}"
@@ -8,7 +8,7 @@ APPLY="${2:-}"
 
 if [[ "$APPLY" != "--apply" ]]; then
   echo "Dry run. Repositories that would be reset under: $WORKSPACE"
-  echo "Run again with --apply to discard local tracked and untracked changes."
+  echo "Run again with --apply to discard local tracked changes."
   find "$WORKSPACE" -type d -name .git -prune -print | sed 's#/.git$##'
   exit 0
 fi
@@ -30,8 +30,6 @@ while IFS= read -r -d '' git_dir; do
     continue
   fi
 
-  # Remove untracked files first so they cannot block a forced checkout.
-  git -C "$repository" clean -fd
   if git -C "$repository" show-ref --verify --quiet "refs/heads/$branch"; then
     # checkout -f discards tracked worktree changes while switching, but does
     # not reset the branch history yet.
