@@ -8,15 +8,15 @@ description: "Create or improve `project-context.yaml` and curated `docs/usage/*
 Create a small, source-grounded context layer; do not replace existing README
 or generate generic documentation.
 
-## Language
+## Mandatory output language: Russian
 
-Write explanatory text for the target developers' working language. For the
-UVZ local knowledge pack, write `project-context.yaml` values and
-`docs/usage/*.md` explanations in Russian so Russian natural-language queries
-retrieve them reliably. Keep technical identifiers unchanged: Gradle aliases,
-coordinates, package and class names, method names, configuration keys, file
-paths, command lines and code snippets remain exactly as in source. Do not
-duplicate whole documents in two languages unless the repository explicitly
+Write **all natural-language content that you create or update in Russian**.
+This is mandatory for `project-context.yaml` values and explanations in
+`docs/usage/*.md`, so Russian natural-language queries retrieve them reliably.
+Do not write these descriptions in English. Keep technical identifiers exactly
+as in source: Gradle aliases, coordinates, package and class names, method
+names, configuration keys, file paths, command lines and code snippets. Do
+not duplicate whole documents in two languages unless the repository explicitly
 requires maintained bilingual documentation.
 
 ## Workflow
