@@ -121,7 +121,16 @@ if [ -n "$KNOWLEDGE_PACK" ]; then
   run_python "$SCRIPT_DIR/install_pack.py" "$KNOWLEDGE_PACK" --destination "$SCRIPT_DIR"
 fi
 
-ln -sfn "$SCRIPT_DIR/skills/library-knowledge-workflow" "$GIGACODE_HOME/skills/library-knowledge-workflow"
+WORKFLOW_SKILL_TARGET="$SCRIPT_DIR/skills/library-knowledge-workflow"
+WORKFLOW_SKILL_LINK="$GIGACODE_HOME/skills/library-knowledge-workflow"
+if [ -e "$WORKFLOW_SKILL_LINK" ] && [ ! -L "$WORKFLOW_SKILL_LINK" ]; then
+  echo "Refusing to replace non-symlink skill path: $WORKFLOW_SKILL_LINK" >&2
+  exit 1
+fi
+if [ -L "$WORKFLOW_SKILL_LINK" ]; then
+  rm "$WORKFLOW_SKILL_LINK"
+fi
+ln -s "$WORKFLOW_SKILL_TARGET" "$WORKFLOW_SKILL_LINK"
 
 SERVER_COMMAND="$PYTHON"
 if [ -n "$PYTHONPATH_PREFIX" ]; then
