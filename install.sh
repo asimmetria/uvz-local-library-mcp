@@ -2,8 +2,29 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-GIGACODE_HOME="${GIGACODE_HOME:-$HOME/.gigacode}"
-MCP_RUNTIME_HOME="${MCP_RUNTIME_HOME:-$GIGACODE_HOME}"
+WORKSPACE_HOME=""
+DISCOVERY_DIR="$SCRIPT_DIR"
+while [ "$DISCOVERY_DIR" != "/" ]; do
+  if [ -d "$DISCOVERY_DIR/.gigacode" ]; then
+    WORKSPACE_HOME="$DISCOVERY_DIR"
+    break
+  fi
+  DISCOVERY_DIR="$(dirname "$DISCOVERY_DIR")"
+done
+if [ -n "${GIGACODE_HOME:-}" ]; then
+  GIGACODE_HOME="$GIGACODE_HOME"
+elif [ -d "$HOME/.gigacode" ] && [ -w "$HOME/.gigacode" ]; then
+  GIGACODE_HOME="$HOME/.gigacode"
+elif [ -n "$WORKSPACE_HOME" ]; then
+  # Corporate shells can expose a synthetic, non-writable $HOME while the
+  # actual GigaCode profile lives beside the developer's workspace.
+  GIGACODE_HOME="$WORKSPACE_HOME/.gigacode"
+else
+  GIGACODE_HOME="$HOME/.gigacode"
+fi
+# Keep Python packages outside .gigacode: some corporate policies permit its
+# settings file but deny importing packages created there.
+MCP_RUNTIME_HOME="${MCP_RUNTIME_HOME:-$SCRIPT_DIR/.mcp-runtime}"
 PYTHON_BIN="${PYTHON_BIN:-}"
 if [ -z "$PYTHON_BIN" ] && [ -x "$GIGACODE_HOME/.venv/bin/python" ]; then
   PYTHON_BIN="$GIGACODE_HOME/.venv/bin/python"
