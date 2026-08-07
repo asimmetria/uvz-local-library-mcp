@@ -4,6 +4,7 @@
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -30,8 +31,11 @@ def main():
     parser.add_argument("--configuration-root", action="append", type=Path, default=[])
     parser.add_argument("--exclude-file", type=Path, help="One exact Git root directory name per line")
     parser.add_argument("--output-dir", type=Path, default=Path(__file__).parent)
+    parser.add_argument("--evaluation-cases", type=Path, default=Path(__file__).with_name("evaluation-cases.json"))
     options = parser.parse_args()
     workspace = options.workspace.resolve()
+    if not options.evaluation_cases.is_file():
+        raise SystemExit("Retrieval evaluation cases do not exist: %s" % options.evaluation_cases)
     roots = []
     for git_dir in workspace.rglob(".git"):
         if not git_dir.is_dir() or any(part in SKIP - {".git"} for part in git_dir.parts):
@@ -53,6 +57,7 @@ def main():
         "catalog": output_dir / "skills/library-knowledge-workflow/generated-catalog.md",
         "audit": output_dir / "audit-summary.json",
         "evaluation": output_dir / "evaluation-summary.json",
+        "cases": output_dir / "evaluation-cases.built.json",
     }
     with tempfile.TemporaryDirectory(prefix="knowledge-build-", dir=str(output_dir)) as directory:
         staging = Path(directory)
@@ -61,6 +66,7 @@ def main():
             "catalog": staging / "generated-catalog.md",
             "audit": staging / "audit-summary.json",
             "evaluation": staging / "evaluation-summary.json",
+            "cases": staging / "evaluation-cases.json",
         }
         command = [sys.executable, str(Path(__file__).with_name("knowledge_indexer.py")), "--pack", "workspace", "--db", str(candidate["database"]), "--catalog", str(candidate["catalog"]), "--audit", str(candidate["audit"])]
         for root in sorted(roots):
@@ -75,25 +81,28 @@ def main():
         if code:
             raise SystemExit(code)
         audit = json.loads(candidate["audit"].read_text(encoding="utf-8"))
-        audit["database"] = str(final["database"])
-        audit["catalog"] = str(final["catalog"])
+        audit["database"] = "knowledge.db"
+        audit["catalog"] = "skills/library-knowledge-workflow/generated-catalog.md"
         candidate["audit"].write_text(json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8")
         code = subprocess.call([
             sys.executable,
             str(Path(__file__).with_name("verify_index.py")),
             "--db", str(candidate["database"]),
             "--audit", str(candidate["audit"]),
+            "--cases", str(options.evaluation_cases.resolve()),
             "--output", str(candidate["evaluation"]),
         ])
         if code:
             raise SystemExit(code)
+        shutil.copyfile(str(options.evaluation_cases.resolve()), str(candidate["cases"]))
         evaluation = json.loads(candidate["evaluation"].read_text(encoding="utf-8"))
-        evaluation["database"] = str(final["database"])
-        evaluation["audit"] = str(final["audit"])
+        evaluation["database"] = "knowledge.db"
+        evaluation["audit"] = "audit-summary.json"
+        evaluation["retrieval_cases"] = "evaluation-cases.built.json"
         candidate["evaluation"].write_text(
             json.dumps(evaluation, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        for name in ("catalog", "audit", "evaluation", "database"):
+        for name in ("catalog", "audit", "evaluation", "cases", "database"):
             final[name].parent.mkdir(parents=True, exist_ok=True)
             os.replace(str(candidate[name]), str(final[name]))
     print("Published verified knowledge index: %s" % final["database"])

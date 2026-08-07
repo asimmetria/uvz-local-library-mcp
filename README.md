@@ -27,7 +27,8 @@ Jimmer, внутренним backend/frontend-библиотекам, конфи
 [source-sync.md](docs/source-sync.md) and
 [product-flow.md](docs/product-flow.md),
 [configuration-model.md](docs/configuration-model.md) and
-[curated-project-context.md](docs/curated-project-context.md).
+[curated-project-context.md](docs/curated-project-context.md),
+[retrieval-evaluation.md](docs/retrieval-evaluation.md).
 
 `PyYAML` is installed only for maintainer runs with `--workspace`; обычному
 developer с готовым pack он не нужен. Runtime MCP использует только стандартную
@@ -89,12 +90,17 @@ Installer сначала использует `$GIGACODE_HOME/.venv/bin/python`,
 целостности, диапазонов строк, HTML-мусора и возможных секретов. Отчёт
 записывается в `evaluation-summary.json`. При провале проверки installer
 завершается с ошибкой, а предыдущая рабочая база не перезаписывается.
+Также выполняется `evaluation-cases.json`: пять реальных Jimmer-вопросов и один
+проверочный запрос на отсутствие выдуманного API. Gate считает Recall@5, MRR и
+долю корректных пустых результатов.
 
 Дополнительные обязательные поисковые ожидания можно проверить вручную:
 
 ```bash
 python3 verify_index.py \
   --db knowledge.db \
+  --audit audit-summary.json \
+  --cases evaluation-cases.json \
   --expect fetcher \
   --output evaluation-summary.json
 ```
@@ -108,6 +114,19 @@ python3 package_pack.py --version YYYY.MM.DD
 Упаковщик принимает только базу, для которой существуют совпадающие по
 SHA-256 успешные `audit-summary.json` и `evaluation-summary.json`. Manifest
 содержит версию схемы и commit каждого исходного repository.
+
+Для внутреннего набора вопросов скопируй формат в ignored-файл
+`evaluation-cases.local.json`, добавь ожидаемые `repository:path` и передай его
+при сборке:
+
+```bash
+./install.sh \
+  --workspace /path/to/projects \
+  --evaluation-cases evaluation-cases.local.json
+```
+
+Тот же файл автоматически попадёт в pack, чтобы результат можно было
+воспроизвести.
 
 ## Установка для разработчика
 

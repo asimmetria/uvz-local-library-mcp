@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "top_k": 5,
+  "thresholds": {
+    "min_recall_at_k": 1.0,
+    "min_mrr": 0.8,
+    "min_negative_pass_rate": 1.0
+  },
+  "cases": [
+    {
+      "id": "jimmer-object-fetcher",
+      "query": "BOOK_FETCHER automatically package objects",
+      "filters": {"repository": "jimmer-docs"},
+      "expected_sources": ["jimmer-docs:docs/query/object-fetcher/usage.mdx"]
+    },
+    {
+      "id": "jimmer-insert-if-absent",
+      "query": "SaveMode INSERT_IF_ABSENT native capabilities",
+      "filters": {"repository": "jimmer-docs"},
+      "expected_sources": ["jimmer-docs:docs/mutation/save-command/save-mode.mdx"]
+    },
+    {
+      "id": "jimmer-association-pseudo-entity",
+      "query": "association pseudo entity source target",
+      "filters": {"repository": "jimmer-docs"},
+      "expected_sources": ["jimmer-docs:docs/query/associations.mdx"]
+    },
+    {
+      "id": "jimmer-reverse-pagination",
+      "query": "reverse sorting pageSize totalCount",
+      "filters": {"repository": "jimmer-docs"},
+      "expected_sources": ["jimmer-docs:docs/query/paging/reverse-sorting.mdx"]
+    },
+    {
+      "id": "jimmer-recursive-fetcher",
+      "query": "recursiveChildNodes depth",
+      "filters": {"repository": "jimmer-docs"},
+      "expected_sources": ["jimmer-docs:docs/query/object-fetcher/recursive.mdx"]
+    },
+    {
+      "id": "unknown-api-refusal",
+      "query": "DefinitelyMissingUvZJimmerSymbol",
+      "expect_no_results": true
+    }
+  ]
+}

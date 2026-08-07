@@ -16,6 +16,7 @@ FILES = {
     "generated-catalog.md": "skills/library-knowledge-workflow/generated-catalog.md",
     "audit-summary.json": "audit-summary.json",
     "evaluation-summary.json": "evaluation-summary.json",
+    "evaluation-cases.json": "evaluation-cases.built.json",
     "knowledge.db": "knowledge.db",
 }
 

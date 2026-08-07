@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from knowledge_schema import KnowledgeSchemaError, validate_schema
+from retrieval_evaluator import fts_query
 
 
 BASE = Path(__file__).parent
@@ -29,8 +30,7 @@ def db():
 
 
 def query(value):
-    terms = re.findall(r"[\w-]+", value, flags=re.UNICODE)
-    return " ".join('"%s"' % term.replace('"', '""') for term in terms)
+    return fts_query(value)
 
 
 def text(value):
@@ -50,8 +50,8 @@ def search(arguments):
         if arguments.get(field):
             filters.append(field + " = ?")
             params.append(arguments[field])
-    params.append(limit)
-    sql = "SELECT source_id, path, kind, language, configuration_set, commit_sha, line_start, line_end, title, snippet(chunks, 12, '**', '**', '…', 28) AS snippet, bm25(chunks) AS rank FROM chunks WHERE chunks MATCH ?"
+    params.append(limit * 20)
+    sql = "SELECT source_id, repository, path, kind, language, configuration_set, commit_sha, line_start, line_end, title, content_hash, snippet(chunks, 12, '**', '**', '…', 28) AS snippet, bm25(chunks) AS rank FROM chunks WHERE chunks MATCH ?"
     if filters:
         sql += " AND " + " AND ".join(filters)
     sql += " ORDER BY rank LIMIT ?"
@@ -60,9 +60,19 @@ def search(arguments):
     if not rows:
         return "Nothing found. Try simpler keywords or use list_libraries."
     result = []
-    for index, row in enumerate(rows, 1):
+    seen_hashes = set()
+    seen_sources = set()
+    for row in rows:
+        source_key = (row["repository"], row["path"])
+        if row["content_hash"] in seen_hashes or source_key in seen_sources:
+            continue
+        seen_hashes.add(row["content_hash"])
+        seen_sources.add(source_key)
+        index = len(result) + 1
         config = " · configuration set: %s" % row["configuration_set"] if row["configuration_set"] else ""
         result.append("### [%d] %s\nsource: `%s`\npath: `%s:%s-%s`\nkind: %s · language: %s%s · commit: %s\n\n%s" % (index, row["title"], row["source_id"], row["path"], row["line_start"], row["line_end"], row["kind"], row["language"], config, row["commit_sha"][:12], row["snippet"]))
+        if len(result) == limit:
+            break
     return "\n\n---\n\n".join(result)
 
 
@@ -71,7 +81,10 @@ def source(arguments):
     if not con:
         return "Knowledge pack is not installed."
     source_id = arguments.get("source_id", "")
-    rows = con.execute("SELECT source_id, path, language, commit_sha, line_start, line_end, title, content FROM chunks WHERE source_id = ? OR source_id GLOB ? ORDER BY source_id", (source_id, source_id.split("#")[0] + "#*")).fetchall()
+    if "#" in source_id:
+        rows = con.execute("SELECT source_id, path, language, commit_sha, line_start, line_end, title, content FROM chunks WHERE source_id = ?", (source_id,)).fetchall()
+    else:
+        rows = con.execute("SELECT source_id, path, language, commit_sha, line_start, line_end, title, content FROM chunks WHERE source_id GLOB ? ORDER BY source_id", (source_id + "#*",)).fetchall()
     con.close()
     if not rows:
         return "Source not found: %s" % source_id

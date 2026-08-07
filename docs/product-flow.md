@@ -57,6 +57,7 @@ knowledge-pack-<version>/
   manifest.json          # pack versions, commits, checksums, build time
   audit-summary.json
   evaluation-summary.json
+  evaluation-cases.json  # exact reproducible benchmark definition
 ```
 
 `manifest.json` makes answers traceable to a specific pack and commit set.

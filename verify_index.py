@@ -9,6 +9,7 @@ import sqlite3
 from pathlib import Path
 
 from knowledge_schema import KnowledgeSchemaError, SCHEMA_VERSION, validate_schema
+from retrieval_evaluator import evaluate, load_definition
 
 
 RAW_HTML = re.compile(r"</?(?:article|aside|div|footer|header|main|nav|script|style)\b", re.IGNORECASE)
@@ -22,6 +23,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", type=Path, default=Path("knowledge.db"))
     parser.add_argument("--audit", type=Path, default=Path("audit-summary.json"))
+    parser.add_argument("--cases", type=Path, help="Retrieval evaluation definition")
     parser.add_argument("--expect", action="append", default=[], help="FTS term expected to find at least one chunk; repeatable")
     parser.add_argument("--output", type=Path, default=Path("evaluation-summary.json"))
     options = parser.parse_args()
@@ -46,6 +48,7 @@ def main():
             report["errors"].append("Ingestion audit is unreadable: %s" % exception)
     expected = {}
     con = sqlite3.connect(options.db)
+    con.row_factory = sqlite3.Row
     try:
         report["schema_version"] = validate_schema(con)
         report["integrity_check"] = con.execute("PRAGMA quick_check").fetchone()[0]
@@ -97,6 +100,17 @@ def main():
             if audit.get("configuration_values_skipped_no_pyyaml", 0):
                 audit_failures.append("configuration values were skipped because PyYAML was unavailable")
         report["audit_failures"] = audit_failures
+        retrieval_passed = True
+        if options.cases:
+            try:
+                retrieval = evaluate(con, load_definition(options.cases))
+                report["retrieval_cases"] = str(options.cases)
+                report["retrieval_cases_sha256"] = hashlib.sha256(options.cases.read_bytes()).hexdigest()
+                report["retrieval_evaluation"] = retrieval
+                retrieval_passed = retrieval["passed"]
+            except (OSError, ValueError, json.JSONDecodeError, sqlite3.DatabaseError) as exception:
+                report["errors"].append("Retrieval evaluation failed: %s" % exception)
+                retrieval_passed = False
         report["passed"] = (
             report["integrity_check"] == "ok"
             and bool(chunks)
@@ -108,6 +122,7 @@ def main():
             and audit is not None
             and not audit_failures
             and not report["errors"]
+            and retrieval_passed
         )
     except (KnowledgeSchemaError, sqlite3.DatabaseError) as exception:
         report["errors"].append(str(exception))

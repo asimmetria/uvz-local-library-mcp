@@ -4,7 +4,7 @@
 import sqlite3
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 CHUNK_COLUMNS = (
     "source_id",
@@ -20,6 +20,7 @@ CHUNK_COLUMNS = (
     "line_end",
     "title",
     "content",
+    "content_hash",
 )
 
 CONFIGURATION_VALUE_COLUMNS = (
@@ -51,7 +52,7 @@ def create_schema(connection):
         "module UNINDEXED, path UNINDEXED, kind UNINDEXED, language UNINDEXED, "
         "configuration_set UNINDEXED, commit_sha UNINDEXED, "
         "line_start UNINDEXED, line_end UNINDEXED, title, content, "
-        "tokenize='unicode61')"
+        "content_hash UNINDEXED, tokenize='unicode61')"
     )
     connection.execute(
         "CREATE TABLE configuration_values ("

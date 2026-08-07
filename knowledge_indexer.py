@@ -32,6 +32,9 @@ SECRET_PATH = r"(?:[A-Za-z0-9_.-]+[._-])?" + SECRET_NAME
 SECRET_KEY = re.compile(r"(?im)^(\s*" + SECRET_PATH + r"\s*[:=]).*$")
 SECRET_BLOCK_START = re.compile(r"(?i)^(\s*)" + SECRET_PATH + r"\s*:\s*[>|]")
 HTML_TAG = re.compile(r"</?(?:a|article|aside|br|code|details|div|em|footer|h[1-6]|header|img|li|main|nav|ol|p|pre|section|script|span|strong|style|table|tbody|td|th|thead|tr|ul)\b[^>]*>", re.IGNORECASE)
+CODE_BOUNDARY = re.compile(
+    r"^(?:@|(?:public|protected|private|internal|abstract|final|open|sealed|data|static|suspend|async|export)\s+)*(?:class|interface|object|enum|record|fun|def|function)\b"
+)
 
 
 def args():
@@ -167,6 +170,35 @@ def normalized_chunk(lines, start, end):
     return "".join(lines[start:end]).strip(), start + 1, end
 
 
+def split_ranges(lines, start, end, max_chars):
+    """Split a line range near paragraph or top-level symbol boundaries."""
+    prefix = [0]
+    for line in lines:
+        prefix.append(prefix[-1] + len(line))
+    cursor = start
+    while cursor < end:
+        hard_end = cursor
+        while hard_end < end:
+            next_size = prefix[hard_end + 1] - prefix[cursor]
+            if hard_end > cursor and next_size > max_chars:
+                break
+            hard_end += 1
+        if hard_end >= end:
+            yield cursor, end
+            return
+        split = hard_end
+        minimum_size = max_chars // 2
+        for candidate in range(hard_end, cursor, -1):
+            current_size = prefix[candidate] - prefix[cursor]
+            paragraph = not lines[candidate - 1].strip()
+            symbol = candidate < end and CODE_BOUNDARY.match(lines[candidate])
+            if symbol or (current_size >= minimum_size and paragraph):
+                split = candidate
+                break
+        yield cursor, split
+        cursor = split
+
+
 def chunks(text, language, max_chars=7000):
     """Yield chunk text and its 1-based inclusive line range."""
     lines = text.splitlines(keepends=True)
@@ -177,21 +209,16 @@ def chunks(text, language, max_chars=7000):
         boundaries = sorted(set([0] + headings + [len(lines)]))
         result = []
         for start, end in zip(boundaries, boundaries[1:]):
-            chunk = normalized_chunk(lines, start, end)
-            if chunk and len(chunk[0]) >= 80:
-                result.append(chunk)
+            for chunk_start, chunk_end in split_ranges(lines, start, end, max_chars):
+                chunk = normalized_chunk(lines, chunk_start, chunk_end)
+                if chunk and len(chunk[0]) >= 80:
+                    result.append(chunk)
         return result
-    result, start, size = [], 0, 0
-    for index, line in enumerate(lines):
-        if size and size + len(line) > max_chars:
-            chunk = normalized_chunk(lines, start, index)
-            if chunk:
-                result.append(chunk)
-            start, size = index, 0
-        size += len(line)
-    chunk = normalized_chunk(lines, start, len(lines))
-    if chunk:
-        result.append(chunk)
+    result = []
+    for start, end in split_ranges(lines, 0, len(lines), max_chars):
+        chunk = normalized_chunk(lines, start, end)
+        if chunk:
+            result.append(chunk)
     return result
 
 
@@ -414,7 +441,8 @@ def main():
                         audit["chunks_too_short"] += 1
                         continue
                     source_id = "%s#%d" % (source_base, position)
-                    con.execute("INSERT INTO chunks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (source_id, options.pack, repo, module, rel, kind, language, config_set, sha, line_start, line_end, title_for(path, chunk), chunk))
+                    content_hash = hashlib.sha256(chunk.encode("utf-8")).hexdigest()
+                    con.execute("INSERT INTO chunks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (source_id, options.pack, repo, module, rel, kind, language, config_set, sha, line_start, line_end, title_for(path, chunk), chunk, content_hash))
                     audit["chunks_indexed"] += 1
             source_revisions.append({
                 "repository": repo,
@@ -436,6 +464,12 @@ def main():
         con.execute("INSERT INTO knowledge_metadata VALUES (?, ?)", ("built_at", built_at))
         con.commit()
         validate_schema(con)
+        duplicate_groups = con.execute(
+            "SELECT count(*) FROM (SELECT content_hash FROM chunks GROUP BY content_hash HAVING count(*) > 1)"
+        ).fetchone()[0]
+        duplicate_chunks = con.execute(
+            "SELECT coalesce(sum(amount - 1), 0) FROM (SELECT count(*) AS amount FROM chunks GROUP BY content_hash HAVING count(*) > 1)"
+        ).fetchone()[0]
         con.close()
         con = None
         database_sha256 = hashlib.sha256(staged_db.read_bytes()).hexdigest()
@@ -448,6 +482,8 @@ def main():
             "built_at": built_at,
             **audit,
             "source_revisions": source_revisions,
+            "duplicate_content_groups": duplicate_groups,
+            "duplicate_chunks_beyond_canonical": duplicate_chunks,
             "sources_excluded": options.excluded_source,
             "database": str(options.db),
             "database_sha256": database_sha256,

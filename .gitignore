@@ -4,6 +4,8 @@ knowledge.db
 skills/library-knowledge-workflow/generated-catalog.md
 audit-summary.json
 evaluation-summary.json
+evaluation-cases.local.json
+evaluation-cases.built.json
 .venv/
 .idea/
 dist/
