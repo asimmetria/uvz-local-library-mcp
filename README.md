@@ -387,6 +387,7 @@ python3 smoke_test.py
 
 ## Дополнительная документация
 
+- [План развития](ROADMAP.md)
 - [Модель project context](docs/curated-project-context.md)
 - [Quality gate](docs/ingestion-audit.md)
 - [Knowledge packs](docs/knowledge-packs.md)
