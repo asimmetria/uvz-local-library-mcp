@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from knowledge_schema import KnowledgeSchemaError, validate_schema
-from retrieval_evaluator import fts_query
+from retrieval_evaluator import RANK_EXPRESSION, fts_query
 
 
 BASE = Path(__file__).parent
@@ -51,7 +51,7 @@ def search(arguments):
             filters.append(field + " = ?")
             params.append(arguments[field])
     params.append(limit * 20)
-    sql = "SELECT source_id, repository, path, kind, language, configuration_set, commit_sha, line_start, line_end, title, content_hash, snippet(chunks, 12, '**', '**', '…', 28) AS snippet, bm25(chunks) AS rank FROM chunks WHERE chunks MATCH ?"
+    sql = "SELECT source_id, repository, path, kind, language, configuration_set, commit_sha, line_start, line_end, title, content_hash, snippet(chunks, 12, '**', '**', '…', 28) AS snippet, " + RANK_EXPRESSION + " AS rank FROM chunks WHERE chunks MATCH ?"
     if filters:
         sql += " AND " + " AND ".join(filters)
     sql += " ORDER BY rank LIMIT ?"
@@ -99,6 +99,7 @@ def repositories():
         "SELECT repository, count(*) AS chunks, "
         "sum(kind = 'source') AS source_chunks, sum(kind = 'example') AS example_chunks, "
         "sum(kind = 'docs') AS docs_chunks, sum(kind = 'configuration') AS config_chunks, "
+        "sum(kind = 'context') AS context_chunks, sum(kind = 'usage') AS usage_chunks, "
         "count(DISTINCT module) AS modules, max(commit_sha) AS commit_sha "
         "FROM chunks GROUP BY repository ORDER BY repository"
     ).fetchall()
@@ -107,8 +108,8 @@ def repositories():
         return "No repositories are indexed."
     lines = ["# Indexed repositories", "", "Use `search_knowledge` with `repository` and optional `module` to search one application.", ""]
     for row in rows:
-        lines.append("- `%s`: %d chunks (%d source, %d examples, %d docs, %d config), %d modules, commit %s" % (
-            row["repository"], row["chunks"], row["source_chunks"], row["example_chunks"], row["docs_chunks"], row["config_chunks"], row["modules"], row["commit_sha"][:12]
+        lines.append("- `%s`: %d chunks (%d context, %d usage, %d source, %d examples, %d docs, %d config), %d modules, commit %s" % (
+            row["repository"], row["chunks"], row["context_chunks"], row["usage_chunks"], row["source_chunks"], row["example_chunks"], row["docs_chunks"], row["config_chunks"], row["modules"], row["commit_sha"][:12]
         ))
     return "\n".join(lines)
 
@@ -214,7 +215,7 @@ def resolve_config(arguments):
 
 
 TOOLS = [
-    {"name": "search_knowledge", "description": "Search local indexed libraries, applications, documentation, examples, source code and configuration. Use this before answering a library/API question.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "pack_id": {"type": "string"}, "repository": {"type": "string", "description": "Optional Git repository name; use list_repositories first"}, "module": {"type": "string", "description": "Optional Gradle module, for example :api"}, "kind": {"type": "string", "enum": ["docs", "example", "source", "configuration"]}, "language": {"type": "string"}, "configuration_set": {"type": "string"}, "limit": {"type": "integer", "default": 5}}, "required": ["query"]}},
+    {"name": "search_knowledge", "description": "Search local indexed project context, verified usage, libraries, applications, documentation, examples, source code and configuration. Curated context and usage rank first.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "pack_id": {"type": "string"}, "repository": {"type": "string", "description": "Optional Git repository name; use list_repositories first"}, "module": {"type": "string", "description": "Optional Gradle module, for example :api"}, "kind": {"type": "string", "enum": ["context", "usage", "docs", "example", "source", "configuration"]}, "language": {"type": "string"}, "configuration_set": {"type": "string"}, "limit": {"type": "integer", "default": 5}}, "required": ["query"]}},
     {"name": "search_config", "description": "Search raw local configuration values. Specify configuration_set when central configuration has multiple variants.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "configuration_set": {"type": "string"}, "limit": {"type": "integer", "default": 5}}, "required": ["query"]}},
     {"name": "suggest_dependency", "description": "ALWAYS call before adding an internal Gradle dependency. Resolves a uvz-platform version-catalog alias and returns the correct libs alias declaration without a direct version.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string", "description": "Library name, artifact, or alias fragment, for example sbertone adapter"}, "scope": {"type": "string", "default": "implementation", "description": "Gradle configuration, for example implementation, api, testImplementation"}}, "required": ["query"]}},
     {"name": "resolve_config", "description": "Resolve YAML leaf values for one application and central configuration set. Result includes exact source provenance. Default order is central base → module base → central profile → module profile; verify it against the application's Spring config-import order.", "inputSchema": {"type": "object", "properties": {"application": {"type": "string", "description": "Application repository name"}, "module": {"type": "string", "description": "Optional Gradle module, for example :api"}, "configuration_set": {"type": "string", "description": "Central configuration variant folder"}, "profile": {"type": "string", "description": "Optional Spring profile"}}, "required": ["application", "configuration_set"]}},

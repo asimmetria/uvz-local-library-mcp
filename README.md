@@ -16,6 +16,8 @@ Jimmer, внутренним backend/frontend-библиотекам, конфи
 - skill содержит только workflow использования MCP, а не копии документации;
 - internal packs содержат полный полезный контекст: код, документацию,
   конфигурацию, примеры и стандарты.
+- проверенный `project-context.yaml` и `docs/usage/*.md` имеют приоритет над
+  случайными совпадениями в исходниках.
 
 ## Стартовый scope
 
@@ -94,6 +96,12 @@ Installer сначала использует `$GIGACODE_HOME/.venv/bin/python`,
 проверочный запрос на отсутствие выдуманного API. Gate считает Recall@5, MRR и
 долю корректных пустых результатов.
 
+Если в индексируемом repository есть `project-context.yaml`, он обязан
+соответствовать schema version 1 и содержать существующие repository-relative
+evidence paths. Ошибка в карточке останавливает сборку до публикации. Валидные
+карточки и `docs/usage/*.md` получают отдельные типы `context`/`usage` и
+поднимаются выше обычного кода в результатах поиска.
+
 Дополнительные обязательные поисковые ожидания можно проверить вручную:
 
 ```bash
@@ -159,7 +167,15 @@ stdio MCP smoke test. После перезапуска GigaCode агент ис
 вручную командой `./scripts/install-project-context-authoring.sh`; она создаёт
 симлинк в `$GIGACODE_HOME/skills/project-context-authoring`. Его scripts
 `list-gradle-projects.sh` и `run-project-context.sh` запускают GigaCode по
-одному выбранному репозиторию, а не по всему workspace.
+одному выбранному репозиторию, а не по всему workspace. После авторинга
+карточки можно проверить без полной индексации:
+
+```bash
+python3 validate_project_contexts.py /path/to/one-project
+```
+
+`run-project-context.sh` выполняет эту проверку автоматически после завершения
+GigaCode.
 
 Maintainer добавляет новый pack в закрытый repository явно (`git add -f
 dist/knowledge-pack-<version>.zip`), поскольку `dist/` намеренно ignored в

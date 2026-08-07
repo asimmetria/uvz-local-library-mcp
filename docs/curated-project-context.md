@@ -26,14 +26,24 @@ the other two paths.
 It is a concise, structured card with at least:
 
 ```yaml
+schema_version: 1
 kind: library # or application
 name: example-facade
 modules: [":example-facade"]
-purpose: One sentence describing the supported responsibility.
-use_when: [When the caller needs example data.]
+purpose: Предоставляет поддерживаемый API для получения данных Example.
+use_when: [Нужно получить данные Example из другого модуля.]
 entrypoints: [com.example.ExampleFacade]
-configuration: [example.client.url]
-examples: [docs/usage/get-data.md]
+configuration:
+  - key: example.client.url
+    required: true
+    description: Адрес приложения-владельца.
+examples:
+  - id: get-data
+    path: docs/usage/get-data.md
+    summary: Получение данных через facade.
+evidence:
+  - path: example-facade/src/main/java/com/example/ExampleFacade.java
+    proves: Подтверждает public entrypoint.
 related: [example-model-shared]
 ```
 
@@ -58,15 +68,22 @@ Each document is a short, reviewed golden path: dependency, imports, minimal
 code, required configuration, expected result and common pitfalls. Examples
 should be executable tests or be kept beside an executable test where possible.
 
-## Planned indexer behaviour
+Полный контракт находится в
+`skills/project-context-authoring/references/project-context-schema.md`.
 
-1. A declared `kind` overrides naming heuristics for the generated catalog.
-2. Context cards and usage examples are tagged and ranked above incidental code
-   matches for usage questions.
-3. `list_libraries` and `list_repositories` expose the declared purpose and
-   examples.
-4. Every curated library gets retrieval evaluation queries before a pack is
-   published.
+## Поведение индексатора
 
-This is intentionally not implemented yet: first we will agree on a real
-card/example from one internal library, then make the schema and indexer stable.
+1. Каждая карточка проверяется по schema version 1 до публикации pack. Сборка
+   отклоняет неизвестный `kind`, английский explanatory text, неправильную
+   структуру и абсолютные/несуществующие evidence/example/component paths.
+   Ссылочный `docs/usage` обязан иметь полный набор стандартных разделов и
+   хотя бы один существующий repository-relative Evidence path.
+2. Валидные карточки индексируются как `kind=context`, а Markdown под
+   `docs/usage/` — как `kind=usage`; оба типа ранжируются выше случайных
+   совпадений в коде и общей документации.
+3. Карточка заменяет naming heuristic соответствующего модуля в generated
+   catalog. `list_libraries` показывает её purpose, use cases и examples;
+   `list_repositories` показывает количество context/usage chunks.
+4. Invalid card останавливает атомарную сборку, поэтому ранее опубликованная
+   база остаётся рабочей. Retrieval cases по важным библиотекам по-прежнему
+   добавляются maintainer-ом перед публикацией pack.

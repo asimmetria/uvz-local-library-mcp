@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 
 from knowledge_indexer import chunks, redact  # noqa: E402
 from knowledge_schema import KnowledgeSchemaError, SCHEMA_VERSION, validate_database  # noqa: E402
+from project_context import validate_card  # noqa: E402
 import server as server_module  # noqa: E402
 from server import query  # noqa: E402
 
@@ -62,6 +63,24 @@ class KnowledgePipelineTest(unittest.TestCase):
             with self.assertRaises(KnowledgeSchemaError):
                 validate_database(database)
 
+    def test_project_context_rejects_non_portable_or_missing_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            card = {
+                "schema_version": 1,
+                "kind": "library",
+                "name": "fixture-library",
+                "purpose": "Предоставляет тестовый API.",
+                "use_when": ["Нужно проверить интеграцию."],
+                "evidence": [
+                    {"path": "/home/user/Fixture.kt", "proves": "Подтверждает API."},
+                    {"path": "missing.kt", "proves": "Подтверждает API."},
+                ],
+            }
+            errors = validate_card(card, root)
+            self.assertTrue(any("absolute local path" in error for error in errors))
+            self.assertTrue(any("does not exist" in error for error in errors))
+
     def test_build_verify_package_and_install(self):
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)
@@ -71,7 +90,8 @@ class KnowledgePipelineTest(unittest.TestCase):
             kotlin.parent.mkdir(parents=True)
             properties.parent.mkdir(parents=True)
             docs = source / "docs"
-            docs.mkdir()
+            usage = docs / "usage"
+            usage.mkdir(parents=True)
             (source / "settings.gradle.kts").write_text('rootProject.name = "fixture-project"\n', encoding="utf-8")
             kotlin.write_text(
                 "\n\npackage demo\n\nclass Example {\n    fun fetchItems(): List<String> = emptyList()\n}\n",
@@ -89,6 +109,35 @@ class KnowledgePipelineTest(unittest.TestCase):
                 + "\n\n# Second section\n\nSecondSectionMarker " + "second " * 20 + "\n",
                 encoding="utf-8",
             )
+            (usage / "fetch-items.md").write_text(
+                "# Получение данных Fixture\n\n"
+                "## Когда использовать\n\nНужно получить данные Fixture через публичный Example API.\n\n"
+                "## Зависимость\n\nДля fixture не требуется внешняя зависимость.\n\n"
+                "## Минимальный пример\n\n`Example().fetchItems()` возвращает список строк.\n\n"
+                "## Обязательная конфигурация\n\nДополнительная конфигурация не требуется.\n\n"
+                "## Ожидаемый результат\n\nВозвращается список строк.\n\n"
+                "## Ограничения и типичные ошибки\n\nИспользуй публичный класс `Example`.\n\n"
+                "## Evidence\n\n- `src/main/kotlin/demo/Example.kt` — подтверждает публичный вызов.\n",
+                encoding="utf-8",
+            )
+            (source / "project-context.yaml").write_text(
+                "schema_version: 1\n"
+                "kind: library\n"
+                "name: fixture-library\n"
+                "aliases:\n  - Fixture API\n"
+                "modules:\n  - ':'\n"
+                "purpose: Предоставляет тестовый API для получения данных Fixture.\n"
+                "use_when:\n  - Нужно получить данные Fixture из другого модуля.\n"
+                "entrypoints:\n  - demo.Example\n"
+                "examples:\n"
+                "  - id: fetch-items\n"
+                "    path: docs/usage/fetch-items.md\n"
+                "    summary: Получение данных через публичный API.\n"
+                "evidence:\n"
+                "  - path: src/main/kotlin/demo/Example.kt\n"
+                "    proves: Подтверждает публичную точку входа.\n",
+                encoding="utf-8",
+            )
             subprocess.run(["git", "init", str(source)], check=True, capture_output=True)
             subprocess.run(["git", "-C", str(source), "add", "."], check=True, capture_output=True)
             subprocess.run(
@@ -101,6 +150,8 @@ class KnowledgePipelineTest(unittest.TestCase):
                 check=True,
                 capture_output=True,
             )
+            validated_context = self.run_script("validate_project_contexts.py", source)
+            self.assertIn("Validated 1 project context cards", validated_context.stdout)
             build_output = workspace / "build-output"
             database = build_output / "knowledge.db"
             catalog = build_output / "skills/library-knowledge-workflow/generated-catalog.md"
@@ -137,6 +188,9 @@ class KnowledgePipelineTest(unittest.TestCase):
             self.assertEqual(SCHEMA_VERSION, validate_database(database))
             audit_report = json.loads(audit.read_text(encoding="utf-8"))
             self.assertEqual(1, audit_report["duplicate_content_groups"])
+            self.assertEqual(1, audit_report["project_contexts_indexed"])
+            self.assertEqual(0, audit_report["project_contexts_invalid"])
+            self.assertEqual(1, audit_report["usage_documents_indexed"])
             self.assertEqual("knowledge.db", audit_report["database"])
             connection = sqlite3.connect(database)
             row = connection.execute(
@@ -145,12 +199,25 @@ class KnowledgePipelineTest(unittest.TestCase):
             secret_content = connection.execute(
                 "SELECT content FROM chunks WHERE path LIKE '%application.properties'"
             ).fetchone()[0]
+            curated_kinds = dict(connection.execute(
+                "SELECT path, kind FROM chunks WHERE kind IN ('context', 'usage')"
+            ).fetchall())
             connection.close()
             self.assertEqual((3, 7), row[:2])
             self.assertNotIn("real-secret", secret_content)
+            self.assertEqual("context", curated_kinds["project-context.yaml"])
+            self.assertEqual("usage", curated_kinds["docs/usage/fetch-items.md"])
+            generated_catalog = catalog.read_text(encoding="utf-8")
+            self.assertIn("fixture-library [library, curated]", generated_catalog)
+            self.assertIn("Предоставляет тестовый API", generated_catalog)
             previous_database = server_module.DB_PATH
             server_module.DB_PATH = database
             try:
+                curated_results = server_module.search({"query": "получить данные Fixture", "limit": 5})
+                self.assertLess(
+                    curated_results.find("path: `project-context.yaml:"),
+                    curated_results.find("path: `docs/usage/fetch-items.md:"),
+                )
                 duplicate_results = server_module.search({"query": "DuplicateFixtureKnowledge", "limit": 5})
                 self.assertEqual(1, duplicate_results.count("source: `"))
                 connection = sqlite3.connect(database)

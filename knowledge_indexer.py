@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from knowledge_schema import SCHEMA_VERSION, create_schema, validate_schema
+from project_context import catalog_item, load_card, validate_card
 
 try:
     import yaml
@@ -228,6 +229,36 @@ def title_for(path, text):
     return (heading.group(1) if heading else symbol.group(1) if symbol else path.stem).strip()
 
 
+def content_kind(path, relative, language):
+    if path.name == "project-context.yaml":
+        return "context"
+    parts = Path(relative).parts
+    if language == "markdown" and len(parts) >= 3 and parts[-3:-1] == ("docs", "usage"):
+        return "usage"
+    if "example" in relative.lower() or "test" in relative.lower():
+        return "example"
+    if language in {"yaml", "toml", "properties"}:
+        return "configuration"
+    if language in {"markdown", "html"}:
+        return "docs"
+    return "source"
+
+
+def add_catalog(catalog, item):
+    """Curated cards replace a naming heuristic for the same module."""
+    curated = item.get("status") == "curated"
+    if curated:
+        item_sources = set(item.get("sources", []))
+        for identifier, existing in list(catalog.items()):
+            if existing.get("status") != "curated" and item_sources.intersection(existing.get("sources", [])):
+                del catalog[identifier]
+    key = item["id"] + "\0" + ",".join(item.get("sources", []))
+    existing = catalog.get(key)
+    if existing and existing.get("status") == "curated" and not curated:
+        return
+    catalog[key] = item
+
+
 def classify(path):
     suffix = path.suffix.lower()
     return CODE_EXTENSIONS.get(suffix) or TEXT_EXTENSIONS.get(suffix)
@@ -387,7 +418,9 @@ def index_configuration_values(con, *, text, source_id, pack, repository, module
 def main():
     options = args()
     staged_db = temporary_path(options.db)
-    con, audit, catalog = None, Counter(), []
+    con, audit, catalog = None, Counter(), {}
+    audit["project_contexts_invalid"] = 0
+    project_context_errors = []
     staged_catalog = None
     staged_audit = None
     source_revisions = []
@@ -409,11 +442,11 @@ def main():
             print("[%d/%d] %s: %s" % (source_number, total_sources, repo, sync_status), flush=True)
             audit["gradle_modules_discovered"] += len(modules)
             if options.pack == "jimmer":
-                catalog.append({"id": repo, "type": "library", "status": "ready", "aliases": [repo.replace("-", " ")], "sources": [repo + ":"], "capabilities": ["docs", "examples", "api"]})
+                add_catalog(catalog, {"id": repo, "type": "library", "status": "ready", "aliases": [repo.replace("-", " ")], "sources": [repo + ":"], "capabilities": ["docs", "examples", "api"]})
             for module_path, module_id in modules.items():
                 module_name = module_path.name
                 if is_library_module(module_path, module_id, modules):
-                    catalog.append({"id": repo + module_id.replace(":", "-"), "type": "library", "status": "discovered", "aliases": [module_name.replace("-", " ")], "sources": [repo + module_id], "capabilities": ["api", "examples"]})
+                    add_catalog(catalog, {"id": repo + module_id.replace(":", "-"), "type": "library", "status": "discovered", "aliases": [module_name.replace("-", " ")], "sources": [repo + module_id], "capabilities": ["api", "examples"]})
             for path, language in walk(root):
                 if localized_docusaurus_content(root, path):
                     audit["files_skipped_localized_docusaurus_docs"] += 1
@@ -428,9 +461,24 @@ def main():
                 if language in {"markdown", "html"} and HTML_TAG.search(text):
                     audit["chunks_with_raw_html"] += 1
                 rel, module = path.relative_to(root).as_posix(), module_for(path, modules)
-                kind = "example" if "example" in rel.lower() or "test" in rel.lower() else "configuration" if language in {"yaml", "toml", "properties"} else "docs" if language in {"markdown", "html"} else "source"
+                kind = content_kind(path, rel, language)
                 config_set = configuration_set(root, path, configuration_roots) if kind == "configuration" else ""
                 source_base = "%s:%s" % (repo, rel)
+                context_card = None
+                if kind == "context":
+                    try:
+                        context_card = load_card(text, yaml)
+                        errors = validate_card(context_card, root)
+                    except ValueError as exception:
+                        errors = [str(exception)]
+                    if errors:
+                        audit["project_contexts_invalid"] += 1
+                        project_context_errors.append({"source": source_base, "errors": errors})
+                        continue
+                    audit["project_contexts_indexed"] += 1
+                    add_catalog(catalog, catalog_item(context_card, repo, module))
+                elif kind == "usage":
+                    audit["usage_documents_indexed"] += 1
                 if kind == "configuration" and language == "yaml":
                     count = index_configuration_values(con, text=text, source_id=source_base, pack=options.pack, repository=repo, module=module, path=Path(rel), config_set=config_set)
                     audit["configuration_values_indexed"] += count
@@ -442,7 +490,8 @@ def main():
                         continue
                     source_id = "%s#%d" % (source_base, position)
                     content_hash = hashlib.sha256(chunk.encode("utf-8")).hexdigest()
-                    con.execute("INSERT INTO chunks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (source_id, options.pack, repo, module, rel, kind, language, config_set, sha, line_start, line_end, title_for(path, chunk), chunk, content_hash))
+                    title = context_card["name"] if context_card else title_for(path, chunk)
+                    con.execute("INSERT INTO chunks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (source_id, options.pack, repo, module, rel, kind, language, config_set, sha, line_start, line_end, title, chunk, content_hash))
                     audit["chunks_indexed"] += 1
             source_revisions.append({
                 "repository": repo,
@@ -458,6 +507,12 @@ def main():
                 audit["chunks_indexed"] - chunks_before,
                 audit["configuration_values_indexed"] - values_before,
             ), flush=True)
+        if project_context_errors:
+            details = "\n".join(
+                "- %s: %s" % (item["source"], "; ".join(item["errors"]))
+                for item in project_context_errors[:50]
+            )
+            raise SystemExit("Invalid project-context.yaml files:\n" + details)
         built_at = datetime.now(timezone.utc).isoformat()
         con.execute("INSERT INTO knowledge_metadata VALUES (?, ?)", ("schema_version", str(SCHEMA_VERSION)))
         con.execute("INSERT INTO knowledge_metadata VALUES (?, ?)", ("pack", options.pack))
@@ -474,8 +529,20 @@ def main():
         con = None
         database_sha256 = hashlib.sha256(staged_db.read_bytes()).hexdigest()
         lines = ["# Generated knowledge catalog", "", "Generated locally; do not edit manually.", ""]
-        for item in sorted(catalog, key=lambda value: value["id"]):
-            lines += ["## %s [%s, %s]" % (item["id"], item["type"], item["status"]), "- aliases: %s" % ", ".join(item["aliases"]), "- sources: %s" % ", ".join(item["sources"]), "- capabilities: %s" % ", ".join(item["capabilities"]), ""]
+        for item in sorted(catalog.values(), key=lambda value: value["id"]):
+            lines += [
+                "## %s [%s, %s]" % (item["id"], item["type"], item["status"]),
+                "- aliases: %s" % ", ".join(item["aliases"]),
+                "- sources: %s" % ", ".join(item["sources"]),
+                "- capabilities: %s" % ", ".join(item["capabilities"]),
+            ]
+            if item.get("purpose"):
+                lines.append("- purpose: %s" % item["purpose"])
+            if item.get("use_when"):
+                lines.append("- use when: %s" % "; ".join(item["use_when"]))
+            if item.get("examples"):
+                lines.append("- examples: %s" % ", ".join(item["examples"]))
+            lines.append("")
         report = {
             "pack": options.pack,
             "schema_version": SCHEMA_VERSION,

@@ -4,6 +4,7 @@ set -Eeuo pipefail
 
 PROJECT="${1:?Usage: $0 /path/to/one-project}"
 PROJECT="$(cd "$PROJECT" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 if ! command -v gigacode >/dev/null 2>&1; then
   echo "gigacode was not found in PATH" >&2
@@ -18,8 +19,8 @@ $project-context-authoring
 1. Найди корневой Gradle-проект, все include(...) подмодули и самостоятельные
    вложенные buildable-проекты. Не выходи за пределы текущего репозитория.
 2. Для самого репозитория и каждого независимо подключаемого модуля создай или
-   обнови project-context.yaml. Правильно классифицируй application, library,
-   library-suite и support-module.
+   обнови project-context.yaml строго по schema version 1 из reference скилла.
+   Правильно классифицируй application, library, library-suite и support-module.
 3. Создай или исправь подтверждённые docs/usage/*.md только по коду, тестам и
    существующей конфигурации. Не меняй production-код, Gradle-конфигурацию,
    миграции или тесты.
@@ -37,8 +38,11 @@ $project-context-authoring
    пиши абсолютные пути этого компьютера.
 7. В конце перечисли созданные/изменённые файлы, доказательства и неизвестные
    моменты, которые должен подтвердить владелец проекта.
+8. Перед завершением проверь, что каждый путь evidence/examples/components
+   существует и ни один созданный файл не содержит абсолютный локальный путь.
 EOF
 )"
 
 cd "$PROJECT"
-exec gigacode -p "$PROMPT" --approval-mode=auto-edit
+gigacode -p "$PROMPT" --approval-mode=auto-edit
+"$SCRIPT_DIR/validate-project-context.sh" "$PROJECT"

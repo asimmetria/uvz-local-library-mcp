@@ -10,15 +10,20 @@ description: "Use for questions about internal libraries, facades, shared models
    or if its repository name is unclear.
 2. Call `mcp__local-library-mcp__search_knowledge` before proposing an API,
    dependency, configuration key or integration pattern.
-3. Call `get_source` for the strongest result when code accuracy matters.
-4. State the source id and commit in the answer. Do not invent API details when
+3. Prefer results tagged `context` for the supported responsibility and
+   boundaries, then `usage` for the integration golden path. If they are not
+   present, use `docs`, `example` and `source` evidence and say that curated
+   project context is missing. Never let an incidental source match override a
+   curated restriction.
+4. Call `get_source` for the strongest result when code accuracy matters.
+5. State the source id and commit in the answer. Do not invent API details when
    the local index has no supporting result.
-5. For configuration questions, first call `search_config` to identify the
+6. For configuration questions, first call `search_config` to identify the
    source files and configuration set. If the user asks for an actual resulting
    value, call `resolve_config` with application, configuration_set and the
    relevant profile/module. Do not claim an effective value without its
    provenance and the reported merge order.
-6. Before adding or documenting an internal Gradle dependency, call
+7. Before adding or documenting an internal Gradle dependency, call
    `suggest_dependency`. Use its `libs.<alias>` declaration only after its
    returned `uvz-platform` catalog line confirms the exact alias and
    coordinates; never derive an alias from an artifact name. Do not write a

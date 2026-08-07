@@ -55,7 +55,7 @@ def main():
         chunks = con.execute("SELECT count(*) FROM chunks").fetchone()[0]
         generated = con.execute("SELECT count(*) FROM chunks WHERE path GLOB '*/generated/*' OR path GLOB '*/__generated/*'").fetchone()[0]
         invalid_lines = con.execute("SELECT count(*) FROM chunks WHERE line_start < 1 OR line_end < line_start").fetchone()[0]
-        docs = con.execute("SELECT source_id, content FROM chunks WHERE kind = 'docs'").fetchall()
+        docs = con.execute("SELECT source_id, content FROM chunks WHERE kind IN ('docs', 'usage')").fetchall()
         raw_html = [source_id for source_id, content in docs if RAW_HTML.search(content)]
         configuration = con.execute("SELECT source_id, content FROM chunks WHERE kind = 'configuration'").fetchall()
         possible_secret_leaks = [
@@ -99,6 +99,8 @@ def main():
                 audit_failures.append("indexer reported raw HTML in chunks")
             if audit.get("configuration_values_skipped_no_pyyaml", 0):
                 audit_failures.append("configuration values were skipped because PyYAML was unavailable")
+            if audit.get("project_contexts_invalid", 0):
+                audit_failures.append("one or more project-context.yaml files are invalid")
         report["audit_failures"] = audit_failures
         retrieval_passed = True
         if options.cases:

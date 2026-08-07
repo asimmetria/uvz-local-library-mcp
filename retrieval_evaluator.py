@@ -5,6 +5,14 @@ import json
 import re
 
 
+RANK_EXPRESSION = (
+    "bm25(chunks) + CASE kind "
+    "WHEN 'context' THEN -4.0 "
+    "WHEN 'usage' THEN -2.5 "
+    "WHEN 'docs' THEN -0.5 ELSE 0 END"
+)
+
+
 def fts_query(value):
     terms = re.findall(r"[\w-]+", value, flags=re.UNICODE)
     return " ".join('"%s"' % term.replace('"', '""') for term in terms)
@@ -27,7 +35,7 @@ def search(connection, query, limit, filters=None):
             parameters.append(filters[field])
     parameters.append(max(limit * 20, limit))
     sql = (
-        "SELECT source_id, repository, path, title, content_hash, bm25(chunks) AS rank "
+        "SELECT source_id, repository, path, title, content_hash, " + RANK_EXPRESSION + " AS rank "
         "FROM chunks WHERE chunks MATCH ?"
     )
     if clauses:

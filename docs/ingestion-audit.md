@@ -20,16 +20,16 @@ knowledge pack проходит четыре проверки.
   сохраняются заголовки, ссылки, таблицы и fenced code blocks.
 - HTML: удаляются `script`, `style`, navigation и известные layout-теги;
   оставшиеся опасные raw tags останавливают quality gate.
-- Код: сохраняются package/module и точный line range; большие файлы пока
-  режутся по строкам и размеру, AST/symbol-aware chunking относится к следующему
-  этапу.
-- YAML/TOML/Gradle: хранить путь, profile/module и ключи; секреты редактировать
+- Код: сохраняются package/module и точный line range; большие файлы режутся
+  по размеру около paragraph и top-level symbol boundaries.
+- YAML/TOML/properties: хранятся path, profile/module и keys; secrets редактируются
   до записи в index.
 
 Автоматические стоп-сигналы текущей версии: raw layout HTML, пустой индекс,
 generated paths, невалидные line ranges, непрочитанные файлы, пропущенный YAML
-parser и возможные неотредактированные secrets. Дедупликация по content hash и
-проверка существования исходного файла появятся вместе с incremental index.
+parser, возможные неотредактированные secrets и невалидный
+`project-context.yaml`. Content-hash deduplication уже используется при выдаче,
+а schema version 1 проверяет существование evidence/example/component paths.
 
 ## 2. Связь с источником
 
@@ -59,8 +59,9 @@ repository, path, commit SHA, line range, source type и pack version. При
 - отсутствие HTML-мусора и секретов в результатах;
 - корректные отказы, когда в pack нет ответа.
 
-Первый Jimmer gate: 20 вопросов из use-case playbook, включая Fetcher, DTO,
-SaveMode, associations, filters, pagination и вопросы вне документации.
+Текущий public Jimmer gate содержит пять positive cases по Fetcher, DTO,
+SaveMode, associations и pagination, а также один negative case по
+несуществующему API. Набор расширяется по мере добавления сценариев.
 
 В текущей локальной версии `verify_index.py` является обязательным gate и
 проверяет schema version, `PRAGMA quick_check`, наличие chunks, generated paths,
