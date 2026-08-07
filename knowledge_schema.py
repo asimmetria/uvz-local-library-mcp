@@ -4,7 +4,7 @@
 import sqlite3
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 CHUNK_COLUMNS = (
     "source_id",
@@ -34,6 +34,35 @@ CONFIGURATION_VALUE_COLUMNS = (
     "layer",
     "key_path",
     "value_json",
+)
+
+DEPENDENCY_ALIAS_COLUMNS = (
+    "pack_id",
+    "catalog_repository",
+    "catalog_path",
+    "catalog_commit_sha",
+    "alias",
+    "accessor",
+    "group_id",
+    "artifact_id",
+    "version_ref",
+    "version_value",
+    "owner_repository",
+    "owner_module",
+)
+
+DEPENDENCY_USAGE_COLUMNS = (
+    "pack_id",
+    "catalog_repository",
+    "catalog_path",
+    "alias",
+    "accessor",
+    "consumer_repository",
+    "consumer_module",
+    "path",
+    "configuration",
+    "commit_sha",
+    "line",
 )
 
 
@@ -66,6 +95,41 @@ def create_schema(connection):
         "repository, module, configuration_set, profile, key_path)"
     )
     connection.execute(
+        "CREATE TABLE dependency_aliases ("
+        "pack_id TEXT NOT NULL, catalog_repository TEXT NOT NULL, "
+        "catalog_path TEXT NOT NULL, catalog_commit_sha TEXT NOT NULL, "
+        "alias TEXT NOT NULL, accessor TEXT NOT NULL, group_id TEXT NOT NULL, "
+        "artifact_id TEXT NOT NULL, version_ref TEXT NOT NULL, "
+        "version_value TEXT NOT NULL, owner_repository TEXT NOT NULL, "
+        "owner_module TEXT NOT NULL)"
+    )
+    connection.execute(
+        "CREATE UNIQUE INDEX dependency_alias_identity ON dependency_aliases("
+        "catalog_repository, catalog_path, alias)"
+    )
+    connection.execute(
+        "CREATE INDEX dependency_alias_lookup ON dependency_aliases("
+        "alias, accessor, artifact_id, owner_repository)"
+    )
+    connection.execute(
+        "CREATE TABLE dependency_usages ("
+        "pack_id TEXT NOT NULL, catalog_repository TEXT NOT NULL, "
+        "catalog_path TEXT NOT NULL, "
+        "alias TEXT NOT NULL, accessor TEXT NOT NULL, "
+        "consumer_repository TEXT NOT NULL, consumer_module TEXT NOT NULL, "
+        "path TEXT NOT NULL, configuration TEXT NOT NULL, "
+        "commit_sha TEXT NOT NULL, line INTEGER NOT NULL)"
+    )
+    connection.execute(
+        "CREATE UNIQUE INDEX dependency_usage_identity ON dependency_usages("
+        "catalog_repository, catalog_path, alias, consumer_repository, consumer_module, "
+        "path, configuration, line)"
+    )
+    connection.execute(
+        "CREATE INDEX dependency_usage_lookup ON dependency_usages("
+        "alias, accessor, consumer_repository, consumer_module)"
+    )
+    connection.execute(
         "CREATE TABLE knowledge_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
     )
     connection.execute("PRAGMA user_version = %d" % SCHEMA_VERSION)
@@ -89,6 +153,16 @@ def validate_schema(connection):
     if configuration_values != CONFIGURATION_VALUE_COLUMNS:
         raise KnowledgeSchemaError(
             "Knowledge pack has an incompatible configuration_values table. "
+            "Rebuild the index or install a current knowledge pack."
+        )
+    if table_columns(connection, "dependency_aliases") != DEPENDENCY_ALIAS_COLUMNS:
+        raise KnowledgeSchemaError(
+            "Knowledge pack has an incompatible dependency_aliases table. "
+            "Rebuild the index or install a current knowledge pack."
+        )
+    if table_columns(connection, "dependency_usages") != DEPENDENCY_USAGE_COLUMNS:
+        raise KnowledgeSchemaError(
+            "Knowledge pack has an incompatible dependency_usages table. "
             "Rebuild the index or install a current knowledge pack."
         )
     if table_columns(connection, "knowledge_metadata") != ("key", "value"):

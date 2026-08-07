@@ -28,7 +28,7 @@ $project-context-authoring
    Gradle aliases, классы, методы, YAML-ключи и пути.
 5. Для каждой внутренней Gradle-зависимости сначала вызови MCP-инструмент
    suggest_dependency с названием артефакта. Сверь alias и координаты с
-   возвращённой точной строкой из uvz-platform/gradle/libs.versions.toml.
+   возвращённой структурной записью uvz-platform version catalog.
    Используй libs alias, например implementation(libs.sbertoneAdapter), только
    при однозначном совпадении. Никогда не выводи alias по имени артефакта. Если
    alias или строка catalog не подтверждены, не выдумывай их и не хардкодь

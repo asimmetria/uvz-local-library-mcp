@@ -101,6 +101,8 @@ def main():
                 audit_failures.append("configuration values were skipped because PyYAML was unavailable")
             if audit.get("project_contexts_invalid", 0):
                 audit_failures.append("one or more project-context.yaml files are invalid")
+            if audit.get("dependency_catalogs_seen", 0) and not audit.get("dependency_aliases_indexed", 0):
+                audit_failures.append("uvz-platform catalog was found but no dependency aliases were indexed")
         report["audit_failures"] = audit_failures
         retrieval_passed = True
         if options.cases:

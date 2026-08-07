@@ -25,8 +25,12 @@ description: "Use for questions about internal libraries, facades, shared models
    provenance and the reported merge order.
 7. Before adding or documenting an internal Gradle dependency, call
    `suggest_dependency`. Use its `libs.<alias>` declaration only after its
-   returned `uvz-platform` catalog line confirms the exact alias and
-   coordinates; never derive an alias from an artifact name. Do not write a
+   structured `uvz-platform` record confirms the exact alias and coordinates;
+   never derive an alias from an artifact name. Do not write a
    direct `group:name:version` dependency when `uvz-platform` provides an
    alias. State the catalog prerequisite if the consumer project has not yet
    imported it.
+8. Call `find_library_usages` when the user asks how a library is used in the
+   existing ecosystem or when a real consumer example would make dependency/API
+   advice safer. Prefer its structured repository/module/path/commit evidence
+   over a textual `build.gradle` match.

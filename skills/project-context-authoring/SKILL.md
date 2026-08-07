@@ -56,7 +56,7 @@ description: "Создаёт и проверяет project-context.yaml и docs/
 
 Для внутренней Gradle-библиотеки сначала вызови MCP `suggest_dependency`.
 Записывай `dependency.alias` и `dependency.declaration` только при однозначном
-совпадении alias и coordinates со строкой `uvz-platform` version catalog.
+совпадении alias и coordinates со структурной записью `uvz-platform` catalog.
 Используй подтверждённый вид вроде `implementation(libs.sbertoneAdapter)` без
 версии. Если alias не найден, опусти `dependency` и добавь вопрос в `unknowns`.
 

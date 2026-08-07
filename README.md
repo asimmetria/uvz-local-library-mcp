@@ -12,6 +12,7 @@
 - проверенные карточки `project-context.yaml` с назначением проекта;
 - golden path примеры из `docs/usage/*.md`;
 - точные Gradle aliases из `uvz-platform`;
+- реальные Gradle consumers внутренних библиотек;
 - YAML-конфигурацию из приложений и нескольких наборов `uvz-config`;
 - source id, repository, commit, path и строки для каждого ответа.
 
@@ -374,6 +375,7 @@ Developer не запускает индексацию и не устанавл�
 | `list_libraries` | Каталог библиотек, приложений и возможностей |
 | `list_repositories` | Все repositories и количество проиндексированных данных |
 | `suggest_dependency` | Подтверждённый `libs.<alias>` из `uvz-platform` |
+| `find_library_usages` | Реальные consumer repositories/modules для библиотеки |
 | `search_config` | Поиск исходных YAML/config-файлов |
 | `resolve_config` | Расчёт effective configuration с provenance |
 | `index_status` | Audit последней индексации |
@@ -388,6 +390,7 @@ python3 smoke_test.py
 ## Дополнительная документация
 
 - [План развития](ROADMAP.md)
+- [Dependency usage graph](docs/dependency-usage-graph.md)
 - [Модель project context](docs/curated-project-context.md)
 - [Quality gate](docs/ingestion-audit.md)
 - [Knowledge packs](docs/knowledge-packs.md)

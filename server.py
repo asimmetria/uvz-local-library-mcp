@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from knowledge_schema import KnowledgeSchemaError, validate_schema
-from retrieval_evaluator import RANK_EXPRESSION, fts_query
+from retrieval_evaluator import KIND_PRIORITY_EXPRESSION, RANK_EXPRESSION, fts_query
 
 
 BASE = Path(__file__).parent
@@ -51,10 +51,10 @@ def search(arguments):
             filters.append(field + " = ?")
             params.append(arguments[field])
     params.append(limit * 20)
-    sql = "SELECT source_id, repository, path, kind, language, configuration_set, commit_sha, line_start, line_end, title, content_hash, snippet(chunks, 12, '**', '**', '…', 28) AS snippet, " + RANK_EXPRESSION + " AS rank FROM chunks WHERE chunks MATCH ?"
+    sql = "SELECT source_id, repository, path, kind, language, configuration_set, commit_sha, line_start, line_end, title, content_hash, snippet(chunks, 12, '**', '**', '…', 28) AS snippet, " + KIND_PRIORITY_EXPRESSION + " AS kind_priority, " + RANK_EXPRESSION + " AS rank FROM chunks WHERE chunks MATCH ?"
     if filters:
         sql += " AND " + " AND ".join(filters)
-    sql += " ORDER BY rank LIMIT ?"
+    sql += " ORDER BY kind_priority, rank LIMIT ?"
     rows = con.execute(sql, params).fetchall()
     con.close()
     if not rows:
@@ -114,59 +114,137 @@ def repositories():
     return "\n".join(lines)
 
 
+def normalized_dependency_text(value):
+    return re.sub(r"[^\w]+", "", value.lower(), flags=re.UNICODE).replace("_", "")
+
+
+def matching_dependency_aliases(con, requested):
+    terms = [
+        normalized_dependency_text(term)
+        for term in re.findall(r"[\w-]+", requested, flags=re.UNICODE)
+        if term.lower() not in {"libs", "library", "dependency"}
+    ]
+    if not terms:
+        return []
+    rows = con.execute(
+        "SELECT * FROM dependency_aliases ORDER BY alias, catalog_path"
+    ).fetchall()
+    return [
+        row for row in rows
+        if all(term in normalized_dependency_text(" ".join(
+            str(row[field]) for field in (
+                "alias", "accessor", "group_id", "artifact_id",
+                "owner_repository", "owner_module",
+            )
+        )) for term in terms)
+    ]
+
+
+def alias_usage_rows(con, alias_row, repository="", limit=10):
+    filters = ["catalog_repository = ?", "catalog_path = ?", "alias = ?"]
+    parameters = [
+        alias_row["catalog_repository"], alias_row["catalog_path"], alias_row["alias"]
+    ]
+    if repository:
+        filters.append("consumer_repository = ?")
+        parameters.append(repository)
+    parameters.append(limit)
+    return con.execute(
+        "SELECT consumer_repository, consumer_module, path, configuration, "
+        "commit_sha, line FROM dependency_usages WHERE "
+        + " AND ".join(filters)
+        + " ORDER BY consumer_repository, consumer_module, path, line LIMIT ?",
+        parameters,
+    ).fetchall()
+
+
 def dependency_suggestion(arguments):
-    """Resolve a Gradle version-catalog alias from the indexed uvz-platform."""
+    """Resolve a structured Gradle alias and show verified consumers."""
     con = db()
     if not con:
         return "Knowledge pack is not installed."
     requested = arguments.get("query", "")
-    terms = re.findall(r"[\w-]+", requested.lower(), flags=re.UNICODE)
-    if not terms:
-        con.close()
-        return "Specify a library name, artifact, or catalog alias."
     scope = arguments.get("scope", "implementation")
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", scope):
         con.close()
         return "Invalid Gradle scope."
-    rows = con.execute(
-        "SELECT source_id, path, commit_sha, content FROM chunks "
-        "WHERE repository = 'uvz-platform' AND path LIKE '%libs.versions.toml' "
-        "ORDER BY source_id"
-    ).fetchall()
-    matches = []
-    for row in rows:
-        for line in row["content"].splitlines():
-            match = re.match(r"\s*([A-Za-z0-9_.-]+)\s*=\s*\{", line)
-            if match and all(term in line.lower() for term in terms):
-                matches.append((match.group(1), line.strip(), row))
+    matches = matching_dependency_aliases(con, requested)
     if not matches:
         con.close()
         return "No matching alias was found in uvz-platform. Do not add a direct version; use search_knowledge to inspect the library and ask the platform owner to add or confirm an alias."
     output = ["# Dependency suggestion", ""]
-    seen = set()
-    for alias, line, row in matches:
-        if alias in seen:
-            continue
-        seen.add(alias)
-        accessor = re.sub(r"[-_.]+", ".", alias)
+    for row in matches[:10]:
+        version = ""
+        if row["version_ref"]:
+            version = " · version ref: `%s`" % row["version_ref"]
+        elif row["version_value"]:
+            version = " · catalog version: `%s`" % row["version_value"]
+        owner = "`%s%s`" % (row["owner_repository"], row["owner_module"]) if row["owner_repository"] else "not resolved"
         output.extend([
-            "- alias: `libs.%s`" % accessor,
-            "- declaration: `%s(libs.%s)`" % (scope, accessor),
-            "- catalog: `%s` · commit `%s`" % (row["path"], row["commit_sha"][:12]),
-            "- catalog entry: `%s`" % line,
+            "## libs.%s" % row["accessor"],
+            "- declaration: `%s(libs.%s)`" % (scope, row["accessor"]),
+            "- coordinates: `%s:%s`%s" % (row["group_id"], row["artifact_id"], version),
+            "- owner: %s" % owner,
+            "- catalog: `%s:%s` · commit `%s`" % (
+                row["catalog_repository"], row["catalog_path"], row["catalog_commit_sha"][:12]
+            ),
         ])
-        example_rows = con.execute(
-            "SELECT repository, path FROM chunks "
-            "WHERE repository != 'uvz-platform' AND path LIKE '%build.gradle.kts' "
-            "AND content LIKE ? ORDER BY repository, path LIMIT 3",
-            ("%%libs.%s%%" % accessor,),
-        ).fetchall()
-        if example_rows:
-            output.append("- indexed examples: " + ", ".join("`%s:%s`" % (example["repository"], example["path"]) for example in example_rows))
+        examples = alias_usage_rows(con, row, limit=3)
+        if examples:
+            output.append("- verified consumers: " + ", ".join(
+                "`%s%s:%s:%d` (%s, commit %s)" % (
+                    example["consumer_repository"], example["consumer_module"],
+                    example["path"], example["line"], example["configuration"],
+                    example["commit_sha"][:12],
+                )
+                for example in examples
+            ))
         output.extend([
             "- prerequisite: the consumer project must import the `uvz-platform` version catalog as `libs`.",
             "",
         ])
+    con.close()
+    return "\n".join(output).rstrip()
+
+
+def library_usages(arguments):
+    con = db()
+    if not con:
+        return "Knowledge pack is not installed."
+    requested = arguments.get("query", "")
+    repository = arguments.get("repository", "")
+    limit = min(max(int(arguments.get("limit", 20)), 1), 50)
+    matches = matching_dependency_aliases(con, requested)
+    if not matches:
+        con.close()
+        return "No matching uvz-platform alias was found. Try an artifact id, repository, or libs alias."
+    output = ["# Verified library usages", ""]
+    remaining = limit
+    for row in matches:
+        usages = alias_usage_rows(con, row, repository=repository, limit=remaining)
+        output.extend([
+            "## libs.%s" % row["accessor"],
+            "coordinates: `%s:%s`" % (row["group_id"], row["artifact_id"]),
+            "owner: `%s%s`" % (row["owner_repository"], row["owner_module"])
+            if row["owner_repository"] else "owner: not resolved",
+            "catalog: `%s:%s` · commit `%s`" % (
+                row["catalog_repository"], row["catalog_path"], row["catalog_commit_sha"][:12]
+            ),
+            "",
+        ])
+        if not usages:
+            output.extend(["No verified consumer build usage found.", ""])
+            continue
+        for usage in usages:
+            output.append("- `%s%s` — `%s:%d` · %s · commit `%s`" % (
+                usage["consumer_repository"], usage["consumer_module"],
+                usage["path"], usage["line"], usage["configuration"],
+                usage["commit_sha"][:12],
+            ))
+        output.append("")
+        remaining -= len(usages)
+        if remaining <= 0:
+            break
     con.close()
     return "\n".join(output).rstrip()
 
@@ -218,6 +296,7 @@ TOOLS = [
     {"name": "search_knowledge", "description": "Search local indexed project context, verified usage, libraries, applications, documentation, examples, source code and configuration. Curated context and usage rank first.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "pack_id": {"type": "string"}, "repository": {"type": "string", "description": "Optional Git repository name; use list_repositories first"}, "module": {"type": "string", "description": "Optional Gradle module, for example :api"}, "kind": {"type": "string", "enum": ["context", "usage", "docs", "example", "source", "configuration"]}, "language": {"type": "string"}, "configuration_set": {"type": "string"}, "limit": {"type": "integer", "default": 5}}, "required": ["query"]}},
     {"name": "search_config", "description": "Search raw local configuration values. Specify configuration_set when central configuration has multiple variants.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "configuration_set": {"type": "string"}, "limit": {"type": "integer", "default": 5}}, "required": ["query"]}},
     {"name": "suggest_dependency", "description": "ALWAYS call before adding an internal Gradle dependency. Resolves a uvz-platform version-catalog alias and returns the correct libs alias declaration without a direct version.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string", "description": "Library name, artifact, or alias fragment, for example sbertone adapter"}, "scope": {"type": "string", "default": "implementation", "description": "Gradle configuration, for example implementation, api, testImplementation"}}, "required": ["query"]}},
+    {"name": "find_library_usages", "description": "Find verified Gradle consumers of an internal library through structured uvz-platform aliases. Returns repository, module, build path, line, configuration and commit.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string", "description": "Library name, artifact id, repository, or libs alias"}, "repository": {"type": "string", "description": "Optional consumer repository filter"}, "limit": {"type": "integer", "default": 20}}, "required": ["query"]}},
     {"name": "resolve_config", "description": "Resolve YAML leaf values for one application and central configuration set. Result includes exact source provenance. Default order is central base → module base → central profile → module profile; verify it against the application's Spring config-import order.", "inputSchema": {"type": "object", "properties": {"application": {"type": "string", "description": "Application repository name"}, "module": {"type": "string", "description": "Optional Gradle module, for example :api"}, "configuration_set": {"type": "string", "description": "Central configuration variant folder"}, "profile": {"type": "string", "description": "Optional Spring profile"}}, "required": ["application", "configuration_set"]}},
     {"name": "get_source", "description": "Read the complete indexed chunk(s) after search_knowledge returned a source id.", "inputSchema": {"type": "object", "properties": {"source_id": {"type": "string"}}, "required": ["source_id"]}},
     {"name": "list_libraries", "description": "List local generated catalog entries and their capabilities.", "inputSchema": {"type": "object", "properties": {}}},
@@ -233,6 +312,8 @@ def dispatch_tool(name, arguments):
         return text(search({**arguments, "kind": "configuration"}))
     if name == "suggest_dependency":
         return text(dependency_suggestion(arguments))
+    if name == "find_library_usages":
+        return text(library_usages(arguments))
     if name == "resolve_config":
         return text(resolve_config(arguments))
     if name == "get_source":
@@ -276,7 +357,7 @@ def handle(message):
         return result(request_id, {
             "protocolVersion": params.get("protocolVersion", "2024-11-05"),
             "capabilities": {"tools": {"listChanged": False}},
-            "serverInfo": {"name": "local-library-mcp", "version": "1.1.0"},
+            "serverInfo": {"name": "local-library-mcp", "version": "1.2.0"},
         })
     if method == "ping":
         return None if request_id is MISSING else result(request_id, {})

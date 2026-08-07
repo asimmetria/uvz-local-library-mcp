@@ -5,11 +5,11 @@ import json
 import re
 
 
-RANK_EXPRESSION = (
-    "bm25(chunks) + CASE kind "
-    "WHEN 'context' THEN -4.0 "
-    "WHEN 'usage' THEN -2.5 "
-    "WHEN 'docs' THEN -0.5 ELSE 0 END"
+RANK_EXPRESSION = "bm25(chunks)"
+KIND_PRIORITY_EXPRESSION = (
+    "CASE kind WHEN 'context' THEN 0 WHEN 'usage' THEN 1 "
+    "WHEN 'docs' THEN 2 WHEN 'example' THEN 3 "
+    "WHEN 'source' THEN 4 ELSE 5 END"
 )
 
 
@@ -35,12 +35,13 @@ def search(connection, query, limit, filters=None):
             parameters.append(filters[field])
     parameters.append(max(limit * 20, limit))
     sql = (
-        "SELECT source_id, repository, path, title, content_hash, " + RANK_EXPRESSION + " AS rank "
+        "SELECT source_id, repository, path, title, content_hash, "
+        + KIND_PRIORITY_EXPRESSION + " AS kind_priority, " + RANK_EXPRESSION + " AS rank "
         "FROM chunks WHERE chunks MATCH ?"
     )
     if clauses:
         sql += " AND " + " AND ".join(clauses)
-    sql += " ORDER BY rank LIMIT ?"
+    sql += " ORDER BY kind_priority, rank LIMIT ?"
     rows = connection.execute(sql, parameters).fetchall()
     unique = []
     seen_hashes = set()

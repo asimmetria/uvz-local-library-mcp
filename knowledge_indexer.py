@@ -14,6 +14,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
+from dependency_graph import find_alias_usages, normalized, parse_version_catalog, resolve_owner
 from knowledge_schema import SCHEMA_VERSION, create_schema, validate_schema
 from project_context import catalog_item, load_card, validate_card
 
@@ -22,9 +23,17 @@ try:
 except ImportError:  # The FTS index remains usable when dependencies are not installed yet.
     yaml = None
 
+try:
+    import tomllib as toml
+except ImportError:
+    try:
+        import tomli as toml
+    except ImportError:
+        toml = None
+
 
 SKIP_DIRS = {".git", ".gradle", ".idea", "build", "dist", "node_modules", "target", "generated", "__generated", "__pycache__"}
-CODE_EXTENSIONS = {".java": "java", ".kt": "kotlin", ".kts": "kotlin", ".ts": "typescript", ".tsx": "typescript", ".js": "javascript", ".jsx": "javascript", ".vue": "vue"}
+CODE_EXTENSIONS = {".java": "java", ".kt": "kotlin", ".kts": "kotlin", ".gradle": "groovy", ".ts": "typescript", ".tsx": "typescript", ".js": "javascript", ".jsx": "javascript", ".vue": "vue"}
 TEXT_EXTENSIONS = {".md": "markdown", ".mdx": "markdown", ".html": "html", ".htm": "html", ".yaml": "yaml", ".yml": "yaml", ".toml": "toml", ".properties": "properties"}
 LIBRARY_SUFFIXES = ("-adapter", "-model-shared", "-facade")
 LIBRARY_CONTAINER_SUFFIX = "-lib"
@@ -259,6 +268,68 @@ def add_catalog(catalog, item):
     catalog[key] = item
 
 
+def owner_candidate(repository, module, names, priority=0):
+    return {
+        "repository": repository,
+        "module": module,
+        "terms": {normalized(name) for name in names if name},
+        "priority": priority,
+    }
+
+
+def index_dependency_graph(con, *, pack, aliases, usages, owners, audit):
+    by_accessor = {}
+    seen_aliases = set()
+    for record in aliases:
+        identity = (record["catalog_repository"], record["catalog_path"], record["alias"])
+        if identity in seen_aliases:
+            continue
+        seen_aliases.add(identity)
+        owner_repository, owner_module = resolve_owner(record, owners)
+        record["owner_repository"] = owner_repository
+        record["owner_module"] = owner_module
+        con.execute(
+            "INSERT INTO dependency_aliases VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                pack, record["catalog_repository"], record["catalog_path"],
+                record["catalog_commit_sha"], record["alias"], record["accessor"],
+                record["group_id"], record["artifact_id"], record["version_ref"],
+                record["version_value"], owner_repository, owner_module,
+            ),
+        )
+        by_accessor.setdefault(record["accessor"], []).append(record)
+        audit["dependency_aliases_indexed"] += 1
+        if owner_repository:
+            audit["dependency_aliases_with_owner"] += 1
+    seen_usages = set()
+    for usage in usages:
+        matches = by_accessor.get(usage["accessor"], [])
+        if not matches:
+            audit["dependency_usages_unresolved"] += 1
+            continue
+        if len(matches) > 1:
+            audit["dependency_alias_collisions"] += 1
+        for record in matches:
+            identity = (
+                record["catalog_repository"], record["catalog_path"], record["alias"],
+                usage["consumer_repository"], usage["consumer_module"],
+                usage["path"], usage["configuration"], usage["line"],
+            )
+            if identity in seen_usages:
+                continue
+            seen_usages.add(identity)
+            con.execute(
+                "INSERT INTO dependency_usages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    pack, record["catalog_repository"], record["catalog_path"],
+                    record["alias"], record["accessor"], usage["consumer_repository"],
+                    usage["consumer_module"], usage["path"],
+                    usage["configuration"], usage["commit_sha"], usage["line"],
+                ),
+            )
+            audit["dependency_usages_indexed"] += 1
+
+
 def classify(path):
     suffix = path.suffix.lower()
     return CODE_EXTENSIONS.get(suffix) or TEXT_EXTENSIONS.get(suffix)
@@ -421,6 +492,12 @@ def main():
     con, audit, catalog = None, Counter(), {}
     audit["project_contexts_invalid"] = 0
     project_context_errors = []
+    dependency_graph_errors = []
+    dependency_aliases = []
+    dependency_usages = []
+    owner_candidates = []
+    audit["dependency_aliases_indexed"] = 0
+    audit["dependency_usages_indexed"] = 0
     staged_catalog = None
     staged_audit = None
     source_revisions = []
@@ -441,6 +518,12 @@ def main():
             values_before = audit["configuration_values_indexed"]
             print("[%d/%d] %s: %s" % (source_number, total_sources, repo, sync_status), flush=True)
             audit["gradle_modules_discovered"] += len(modules)
+            owner_candidates.append(owner_candidate(repo, ":", (repo,), priority=2))
+            for module_path, module_id in modules.items():
+                if module_id != ":":
+                    owner_candidates.append(
+                        owner_candidate(repo, module_id, (module_path.name,), priority=3)
+                    )
             if options.pack == "jimmer":
                 add_catalog(catalog, {"id": repo, "type": "library", "status": "ready", "aliases": [repo.replace("-", " ")], "sources": [repo + ":"], "capabilities": ["docs", "examples", "api"]})
             for module_path, module_id in modules.items():
@@ -477,8 +560,38 @@ def main():
                         continue
                     audit["project_contexts_indexed"] += 1
                     add_catalog(catalog, catalog_item(context_card, repo, module))
+                    owner_candidates.append(owner_candidate(
+                        repo,
+                        module,
+                        [context_card["name"]] + context_card.get("aliases", []),
+                        priority=10,
+                    ))
                 elif kind == "usage":
                     audit["usage_documents_indexed"] += 1
+                if repo == "uvz-platform" and path.name == "libs.versions.toml":
+                    audit["dependency_catalogs_seen"] += 1
+                    try:
+                        records = parse_version_catalog(raw, toml)
+                    except ValueError as exception:
+                        dependency_graph_errors.append("%s: %s" % (source_base, exception))
+                    else:
+                        for record in records:
+                            record.update({
+                                "catalog_repository": repo,
+                                "catalog_path": rel,
+                                "catalog_commit_sha": sha,
+                            })
+                            dependency_aliases.append(record)
+                        audit["dependency_catalog_entries_seen"] += len(records)
+                if path.name in {"build.gradle", "build.gradle.kts"}:
+                    for usage in find_alias_usages(raw):
+                        usage.update({
+                            "consumer_repository": repo,
+                            "consumer_module": module,
+                            "path": rel,
+                            "commit_sha": sha,
+                        })
+                        dependency_usages.append(usage)
                 if kind == "configuration" and language == "yaml":
                     count = index_configuration_values(con, text=text, source_id=source_base, pack=options.pack, repository=repo, module=module, path=Path(rel), config_set=config_set)
                     audit["configuration_values_indexed"] += count
@@ -513,6 +626,16 @@ def main():
                 for item in project_context_errors[:50]
             )
             raise SystemExit("Invalid project-context.yaml files:\n" + details)
+        if dependency_graph_errors:
+            raise SystemExit("Invalid dependency catalogs:\n- " + "\n- ".join(dependency_graph_errors[:50]))
+        index_dependency_graph(
+            con,
+            pack=options.pack,
+            aliases=dependency_aliases,
+            usages=dependency_usages,
+            owners=owner_candidates,
+            audit=audit,
+        )
         built_at = datetime.now(timezone.utc).isoformat()
         con.execute("INSERT INTO knowledge_metadata VALUES (?, ?)", ("schema_version", str(SCHEMA_VERSION)))
         con.execute("INSERT INTO knowledge_metadata VALUES (?, ?)", ("pack", options.pack))

@@ -13,11 +13,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from dependency_graph import find_alias_usages, parse_version_catalog  # noqa: E402
 from knowledge_indexer import chunks, redact  # noqa: E402
 from knowledge_schema import KnowledgeSchemaError, SCHEMA_VERSION, validate_database  # noqa: E402
 from project_context import validate_card  # noqa: E402
 import server as server_module  # noqa: E402
 from server import query  # noqa: E402
+
+try:  # noqa: E402
+    import tomllib as toml
+except ImportError:  # noqa: E402
+    import tomli as toml
 
 
 class KnowledgePipelineTest(unittest.TestCase):
@@ -52,6 +58,43 @@ class KnowledgePipelineTest(unittest.TestCase):
         split = chunks(large, "kotlin", max_chars=180)
         self.assertGreater(len(split), 1)
         self.assertTrue(any(part.startswith("class Second") for part, _, _ in split))
+
+    def test_structured_catalog_and_comment_free_usage_extraction(self):
+        catalog = parse_version_catalog(
+            '[versions]\nfixture = "1.2.3"\nstrict = { strictly = "4.0" }\n\n'
+            '[libraries]\n'
+            'fixtureLibrary = { module = "com.example:fixture-library", version.ref = "fixture" }\n'
+            'fixture-test-kit = { group = "com.example", name = "fixture-test-kit", version = "2.0" }\n'
+            'nested.adapter = { module = "com.example:nested-adapter" }\n'
+            'strictLibrary = { module = "com.example:strict-library", version.ref = "strict" }\n'
+            'legacy = "com.example:legacy-lib:3.0"\n',
+            toml,
+        )
+        by_alias = {item["alias"]: item for item in catalog}
+        self.assertEqual("1.2.3", by_alias["fixtureLibrary"]["version_value"])
+        self.assertEqual("fixture.test.kit", by_alias["fixture-test-kit"]["accessor"])
+        self.assertEqual("nested.adapter", by_alias["nested.adapter"]["accessor"])
+        self.assertEqual("4.0", by_alias["strictLibrary"]["version_value"])
+        self.assertEqual("3.0", by_alias["legacy"]["version_value"])
+        usages = find_alias_usages(
+            "dependencies {\n"
+            "  implementation(libs.fixtureLibrary)\n"
+            "  implementation(libs.bundles.fixture)\n"
+            "  // api(libs.commentOnly)\n"
+            "  val documentation = \"libs.stringOnly\"\n"
+            "  /* runtimeOnly(libs.blockCommentOnly) */\n"
+            "  testImplementation(platform(libs.fixtureBom))\n"
+            "  runtimeOnly libs.legacyRuntime\n"
+            "}\n"
+        )
+        self.assertEqual(
+            [
+                {"accessor": "fixtureLibrary", "configuration": "implementation", "line": 2},
+                {"accessor": "fixtureBom", "configuration": "testImplementation", "line": 7},
+                {"accessor": "legacyRuntime", "configuration": "runtimeOnly", "line": 8},
+            ],
+            usages,
+        )
 
     def test_old_schema_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -93,6 +136,22 @@ class KnowledgePipelineTest(unittest.TestCase):
             usage = docs / "usage"
             usage.mkdir(parents=True)
             (source / "settings.gradle.kts").write_text('rootProject.name = "fixture-project"\n', encoding="utf-8")
+            (source / "build.gradle.kts").write_text(
+                "dependencies {\n"
+                "    implementation(libs.fixtureLibrary)\n"
+                "    api(libs.helperAdapter)\n"
+                "    testImplementation(libs.fixtureTestKit)\n"
+                "    // runtimeOnly(libs.ignoredAlias)\n"
+                "    val sample = \"libs.ignoredAlias\"\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            legacy_build = source / "legacy/build.gradle"
+            legacy_build.parent.mkdir()
+            legacy_build.write_text(
+                "dependencies {\n    runtimeOnly libs.helperAdapter\n}\n",
+                encoding="utf-8",
+            )
             kotlin.write_text(
                 "\n\npackage demo\n\nclass Example {\n    fun fetchItems(): List<String> = emptyList()\n}\n",
                 encoding="utf-8",
@@ -152,6 +211,33 @@ class KnowledgePipelineTest(unittest.TestCase):
             )
             validated_context = self.run_script("validate_project_contexts.py", source)
             self.assertIn("Validated 1 project context cards", validated_context.stdout)
+            platform = workspace / "uvz-platform"
+            platform_catalog = platform / "gradle/libs.versions.toml"
+            platform_catalog.parent.mkdir(parents=True)
+            platform_catalog.write_text(
+                '[versions]\nfixture = "1.4.2"\n\n'
+                '[libraries]\n'
+                'fixtureLibrary = { module = "com.example:fixture-library", version.ref = "fixture" }\n'
+                'helperAdapter = { module = "com.example:helper-adapter", version = "2.0" }\n'
+                'fixtureTestKit = { group = "com.example", name = "fixture-test-kit", version.ref = "fixture" }\n'
+                'ignoredAlias = { module = "com.example:ignored-alias" }\n',
+                encoding="utf-8",
+            )
+            (platform / "settings.gradle.kts").write_text(
+                'rootProject.name = "uvz-platform"\n', encoding="utf-8"
+            )
+            subprocess.run(["git", "init", str(platform)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(platform), "add", "."], check=True, capture_output=True)
+            subprocess.run(
+                [
+                    "git", "-C", str(platform),
+                    "-c", "user.name=Fixture",
+                    "-c", "user.email=fixture@example.invalid",
+                    "commit", "-m", "Fixture platform",
+                ],
+                check=True,
+                capture_output=True,
+            )
             build_output = workspace / "build-output"
             database = build_output / "knowledge.db"
             catalog = build_output / "skills/library-knowledge-workflow/generated-catalog.md"
@@ -173,6 +259,21 @@ class KnowledgePipelineTest(unittest.TestCase):
                         "expected_sources": ["fixture-project:src/main/kotlin/demo/Example.kt"],
                     },
                     {
+                        "id": "fixture-dependency-implementation",
+                        "query": "implementation libs.fixtureLibrary",
+                        "expected_sources": ["fixture-project:build.gradle.kts"],
+                    },
+                    {
+                        "id": "fixture-dependency-api",
+                        "query": "api libs.helperAdapter",
+                        "expected_sources": ["fixture-project:build.gradle.kts"],
+                    },
+                    {
+                        "id": "fixture-dependency-test",
+                        "query": "testImplementation libs.fixtureTestKit",
+                        "expected_sources": ["fixture-project:build.gradle.kts"],
+                    },
+                    {
                         "id": "fixture-missing",
                         "query": "DefinitelyMissingFixtureSymbol",
                         "expect_no_results": True,
@@ -191,6 +292,9 @@ class KnowledgePipelineTest(unittest.TestCase):
             self.assertEqual(1, audit_report["project_contexts_indexed"])
             self.assertEqual(0, audit_report["project_contexts_invalid"])
             self.assertEqual(1, audit_report["usage_documents_indexed"])
+            self.assertEqual(4, audit_report["dependency_aliases_indexed"])
+            self.assertEqual(4, audit_report["dependency_usages_indexed"])
+            self.assertEqual(1, audit_report["dependency_aliases_with_owner"])
             self.assertEqual("knowledge.db", audit_report["database"])
             connection = sqlite3.connect(database)
             row = connection.execute(
@@ -202,21 +306,51 @@ class KnowledgePipelineTest(unittest.TestCase):
             curated_kinds = dict(connection.execute(
                 "SELECT path, kind FROM chunks WHERE kind IN ('context', 'usage')"
             ).fetchall())
+            dependency_alias = connection.execute(
+                "SELECT group_id, artifact_id, version_ref, version_value, "
+                "owner_repository, owner_module FROM dependency_aliases "
+                "WHERE alias = 'fixtureLibrary'"
+            ).fetchone()
+            dependency_usages = connection.execute(
+                "SELECT alias, configuration, line FROM dependency_usages ORDER BY path, line"
+            ).fetchall()
             connection.close()
             self.assertEqual((3, 7), row[:2])
             self.assertNotIn("real-secret", secret_content)
             self.assertEqual("context", curated_kinds["project-context.yaml"])
             self.assertEqual("usage", curated_kinds["docs/usage/fetch-items.md"])
+            self.assertEqual(
+                ("com.example", "fixture-library", "fixture", "1.4.2", "fixture-project", ":"),
+                dependency_alias,
+            )
+            self.assertEqual(
+                [
+                    ("fixtureLibrary", "implementation", 2),
+                    ("helperAdapter", "api", 3),
+                    ("fixtureTestKit", "testImplementation", 4),
+                    ("helperAdapter", "runtimeOnly", 2),
+                ],
+                dependency_usages,
+            )
             generated_catalog = catalog.read_text(encoding="utf-8")
             self.assertIn("fixture-library [library, curated]", generated_catalog)
             self.assertIn("Предоставляет тестовый API", generated_catalog)
             previous_database = server_module.DB_PATH
             server_module.DB_PATH = database
             try:
+                suggestion = server_module.dependency_suggestion({"query": "fixture library"})
+                self.assertIn("implementation(libs.fixtureLibrary)", suggestion)
+                self.assertIn("com.example:fixture-library", suggestion)
+                self.assertIn("fixture-project", suggestion)
+                verified_usages = server_module.library_usages({"query": "libs.fixtureLibrary"})
+                self.assertIn("fixture-project", verified_usages)
+                self.assertIn("build.gradle.kts:2", verified_usages)
+                self.assertNotIn("ignoredAlias", verified_usages)
                 curated_results = server_module.search({"query": "получить данные Fixture", "limit": 5})
                 self.assertLess(
                     curated_results.find("path: `project-context.yaml:"),
                     curated_results.find("path: `docs/usage/fetch-items.md:"),
+                    curated_results,
                 )
                 duplicate_results = server_module.search({"query": "DuplicateFixtureKnowledge", "limit": 5})
                 self.assertEqual(1, duplicate_results.count("source: `"))

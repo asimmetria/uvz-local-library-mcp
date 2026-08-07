@@ -37,6 +37,11 @@ knowledge entries.
 installer используют один schema contract. Pack не публикуется, если audit или
 evaluation относятся к другой базе либо evaluation завершилась неуспешно.
 
+Текущая schema version 3 добавляет структурный Gradle dependency graph:
+`dependency_aliases` и `dependency_usages`. Pack старой схемы нельзя использовать
+с новым runtime — maintainer должен выполнить полную переиндексацию и собрать
+новый архив.
+
 ## Full-context internal packs
 
 Internal pack должен включать весь полезный контекст: исходный код, Markdown,

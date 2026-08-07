@@ -12,6 +12,7 @@ REQUIRED_TOOLS = {
     "search_knowledge",
     "search_config",
     "suggest_dependency",
+    "find_library_usages",
     "resolve_config",
     "get_source",
     "list_libraries",

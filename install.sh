@@ -112,6 +112,13 @@ PY
 if [ -n "$WORKSPACE" ]; then
   install_requirements "$SCRIPT_DIR/requirements-indexer.txt"
   run_python -c 'import yaml; print("Validated YAML parser for index build")'
+  run_python - <<'PY'
+try:
+    import tomllib
+except ImportError:
+    import tomli
+print("Validated TOML parser for dependency graph")
+PY
   BUILD_ARGS=("$SCRIPT_DIR/build_workspace.py" "$WORKSPACE")
   [ "$SYNC" = "1" ] && BUILD_ARGS+=(--sync)
   for root in "${CONFIGURATION_ROOTS[@]}"; do BUILD_ARGS+=(--configuration-root "$root"); done
