@@ -3,6 +3,8 @@ manifest.local.json
 knowledge.db
 skills/library-knowledge-workflow/generated-catalog.md
 audit-summary.json
+evaluation-summary.json
 .venv/
+.idea/
 dist/
 index-exclude.txt

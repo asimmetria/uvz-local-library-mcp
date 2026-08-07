@@ -2,8 +2,11 @@
 """Discover Git roots below a workspace and build one local knowledge pack."""
 
 import argparse
+import json
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -26,6 +29,7 @@ def main():
     parser.add_argument("--sync", action="store_true")
     parser.add_argument("--configuration-root", action="append", type=Path, default=[])
     parser.add_argument("--exclude-file", type=Path, help="One exact Git root directory name per line")
+    parser.add_argument("--output-dir", type=Path, default=Path(__file__).parent)
     options = parser.parse_args()
     workspace = options.workspace.resolve()
     roots = []
@@ -42,16 +46,57 @@ def main():
         raise SystemExit("No Git repositories found under %s" % workspace)
     if skipped:
         print("Excluded from indexing: " + ", ".join(skipped), flush=True)
-    command = [sys.executable, str(Path(__file__).with_name("knowledge_indexer.py")), "--pack", "workspace", "--db", str(Path(__file__).with_name("knowledge.db")), "--catalog", str(Path(__file__).with_name("skills") / "library-knowledge-workflow" / "generated-catalog.md"), "--audit", str(Path(__file__).with_name("audit-summary.json"))]
-    for root in sorted(roots):
-        command += ["--source", str(root)]
-    if options.sync:
-        command.append("--sync")
-    for root in options.configuration_root:
-        command += ["--configuration-root", str(root.resolve())]
-    for name in skipped:
-        command += ["--excluded-source", name]
-    raise SystemExit(subprocess.call(command))
+    output_dir = options.output_dir.resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    final = {
+        "database": output_dir / "knowledge.db",
+        "catalog": output_dir / "skills/library-knowledge-workflow/generated-catalog.md",
+        "audit": output_dir / "audit-summary.json",
+        "evaluation": output_dir / "evaluation-summary.json",
+    }
+    with tempfile.TemporaryDirectory(prefix="knowledge-build-", dir=str(output_dir)) as directory:
+        staging = Path(directory)
+        candidate = {
+            "database": staging / "knowledge.db",
+            "catalog": staging / "generated-catalog.md",
+            "audit": staging / "audit-summary.json",
+            "evaluation": staging / "evaluation-summary.json",
+        }
+        command = [sys.executable, str(Path(__file__).with_name("knowledge_indexer.py")), "--pack", "workspace", "--db", str(candidate["database"]), "--catalog", str(candidate["catalog"]), "--audit", str(candidate["audit"])]
+        for root in sorted(roots):
+            command += ["--source", str(root)]
+        if options.sync:
+            command.append("--sync")
+        for root in options.configuration_root:
+            command += ["--configuration-root", str(root.resolve())]
+        for name in skipped:
+            command += ["--excluded-source", name]
+        code = subprocess.call(command)
+        if code:
+            raise SystemExit(code)
+        audit = json.loads(candidate["audit"].read_text(encoding="utf-8"))
+        audit["database"] = str(final["database"])
+        audit["catalog"] = str(final["catalog"])
+        candidate["audit"].write_text(json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8")
+        code = subprocess.call([
+            sys.executable,
+            str(Path(__file__).with_name("verify_index.py")),
+            "--db", str(candidate["database"]),
+            "--audit", str(candidate["audit"]),
+            "--output", str(candidate["evaluation"]),
+        ])
+        if code:
+            raise SystemExit(code)
+        evaluation = json.loads(candidate["evaluation"].read_text(encoding="utf-8"))
+        evaluation["database"] = str(final["database"])
+        evaluation["audit"] = str(final["audit"])
+        candidate["evaluation"].write_text(
+            json.dumps(evaluation, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        for name in ("catalog", "audit", "evaluation", "database"):
+            final[name].parent.mkdir(parents=True, exist_ok=True)
+            os.replace(str(candidate[name]), str(final[name]))
+    print("Published verified knowledge index: %s" % final["database"])
 
 
 if __name__ == "__main__":

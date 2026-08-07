@@ -6,6 +6,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from knowledge_schema import KnowledgeSchemaError, validate_schema
+
 
 BASE = Path(__file__).parent
 DB_PATH = BASE / "knowledge.db"
@@ -18,11 +20,17 @@ def db():
         return None
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
+    try:
+        validate_schema(con)
+    except Exception:
+        con.close()
+        raise
     return con
 
 
 def query(value):
-    return " ".join(re.findall(r"[\w-]+", value, flags=re.UNICODE))
+    terms = re.findall(r"[\w-]+", value, flags=re.UNICODE)
+    return " ".join('"%s"' % term.replace('"', '""') for term in terms)
 
 
 def text(value):
@@ -43,7 +51,7 @@ def search(arguments):
             filters.append(field + " = ?")
             params.append(arguments[field])
     params.append(limit)
-    sql = "SELECT source_id, path, kind, language, configuration_set, commit_sha, title, snippet(chunks, 12, '**', '**', '…', 28) AS snippet, bm25(chunks) AS rank FROM chunks WHERE chunks MATCH ?"
+    sql = "SELECT source_id, path, kind, language, configuration_set, commit_sha, line_start, line_end, title, snippet(chunks, 12, '**', '**', '…', 28) AS snippet, bm25(chunks) AS rank FROM chunks WHERE chunks MATCH ?"
     if filters:
         sql += " AND " + " AND ".join(filters)
     sql += " ORDER BY rank LIMIT ?"
@@ -54,7 +62,7 @@ def search(arguments):
     result = []
     for index, row in enumerate(rows, 1):
         config = " · configuration set: %s" % row["configuration_set"] if row["configuration_set"] else ""
-        result.append("### [%d] %s\nsource: `%s`\nkind: %s · language: %s%s · commit: %s\n\n%s" % (index, row["title"], row["source_id"], row["kind"], row["language"], config, row["commit_sha"][:12], row["snippet"]))
+        result.append("### [%d] %s\nsource: `%s`\npath: `%s:%s-%s`\nkind: %s · language: %s%s · commit: %s\n\n%s" % (index, row["title"], row["source_id"], row["path"], row["line_start"], row["line_end"], row["kind"], row["language"], config, row["commit_sha"][:12], row["snippet"]))
     return "\n\n---\n\n".join(result)
 
 
@@ -63,11 +71,11 @@ def source(arguments):
     if not con:
         return "Knowledge pack is not installed."
     source_id = arguments.get("source_id", "")
-    rows = con.execute("SELECT source_id, path, language, commit_sha, title, content FROM chunks WHERE source_id = ? OR source_id GLOB ? ORDER BY source_id", (source_id, source_id.split("#")[0] + "#*")).fetchall()
+    rows = con.execute("SELECT source_id, path, language, commit_sha, line_start, line_end, title, content FROM chunks WHERE source_id = ? OR source_id GLOB ? ORDER BY source_id", (source_id, source_id.split("#")[0] + "#*")).fetchall()
     con.close()
     if not rows:
         return "Source not found: %s" % source_id
-    return "\n\n---\n\n".join("### %s\nsource: `%s`\npath: `%s` · %s · %s\n\n%s" % (row["title"], row["source_id"], row["path"], row["language"], row["commit_sha"][:12], row["content"]) for row in rows)
+    return "\n\n---\n\n".join("### %s\nsource: `%s`\npath: `%s:%s-%s` · %s · %s\n\n%s" % (row["title"], row["source_id"], row["path"], row["line_start"], row["line_end"], row["language"], row["commit_sha"][:12], row["content"]) for row in rows)
 
 
 def repositories():
@@ -204,7 +212,7 @@ TOOLS = [
 ]
 
 
-def call_tool(name, arguments):
+def dispatch_tool(name, arguments):
     if name == "search_knowledge":
         return text(search(arguments))
     if name == "search_config":
@@ -222,6 +230,15 @@ def call_tool(name, arguments):
     if name == "index_status":
         return text(AUDIT_PATH.read_text(encoding="utf-8") if AUDIT_PATH.exists() else "No local index run found.")
     return text("Unknown tool: %s" % name)
+
+
+def call_tool(name, arguments):
+    try:
+        return dispatch_tool(name, arguments)
+    except KnowledgeSchemaError as exception:
+        return text(str(exception))
+    except sqlite3.DatabaseError as exception:
+        return text("Knowledge pack database is unreadable: %s. Install a current pack." % exception)
 
 
 MISSING = object()
@@ -245,7 +262,7 @@ def handle(message):
         return result(request_id, {
             "protocolVersion": params.get("protocolVersion", "2024-11-05"),
             "capabilities": {"tools": {"listChanged": False}},
-            "serverInfo": {"name": "local-library-mcp", "version": "1.0.0"},
+            "serverInfo": {"name": "local-library-mcp", "version": "1.1.0"},
         })
     if method == "ping":
         return None if request_id is MISSING else result(request_id, {})

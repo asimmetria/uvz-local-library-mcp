@@ -121,6 +121,10 @@ if [ -n "$KNOWLEDGE_PACK" ]; then
   run_python "$SCRIPT_DIR/install_pack.py" "$KNOWLEDGE_PACK" --destination "$SCRIPT_DIR"
 fi
 
+if [ -f "$SCRIPT_DIR/knowledge.db" ]; then
+  run_python "$SCRIPT_DIR/smoke_test.py" --server "$SCRIPT_DIR/server.py" --python "$PYTHON"
+fi
+
 WORKFLOW_SKILL_TARGET="$SCRIPT_DIR/skills/library-knowledge-workflow"
 WORKFLOW_SKILL_LINK="$GIGACODE_HOME/skills/library-knowledge-workflow"
 if [ -e "$WORKFLOW_SKILL_LINK" ] && [ ! -L "$WORKFLOW_SKILL_LINK" ]; then

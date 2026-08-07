@@ -85,17 +85,29 @@ Installer сначала использует `$GIGACODE_HOME/.venv/bin/python`,
 Шаблон: `index-exclude.example.txt`. Для другого расположения используй
 `--exclude-file /path/to/list.txt` или переменную `INDEX_EXCLUDE_FILE`.
 
-После успешной сборки можно выполнить необязательную проверку качества:
+После сборки `install.sh` автоматически запускает проверку схемы SQLite,
+целостности, диапазонов строк, HTML-мусора и возможных секретов. Отчёт
+записывается в `evaluation-summary.json`. При провале проверки installer
+завершается с ошибкой, а предыдущая рабочая база не перезаписывается.
+
+Дополнительные обязательные поисковые ожидания можно проверить вручную:
 
 ```bash
-python3 verify_index.py --db knowledge.db --expect fetcher
+python3 verify_index.py \
+  --db knowledge.db \
+  --expect fetcher \
+  --output evaluation-summary.json
 ```
 
 Затем maintainer публикует готовый pack:
 
 ```bash
-python3 package_pack.py --version 2026.07.22
+python3 package_pack.py --version YYYY.MM.DD
 ```
+
+Упаковщик принимает только базу, для которой существуют совпадающие по
+SHA-256 успешные `audit-summary.json` и `evaluation-summary.json`. Manifest
+содержит версию схемы и commit каждого исходного repository.
 
 ## Установка для разработчика
 
@@ -111,7 +123,9 @@ cd uvz-local-library-mcp
 
 Без `--workspace` и `--knowledge-pack` installer сам выберет самый новый
 `dist/knowledge-pack-*.zip`. Он ставит локальный stdio MCP и generic skill.
-После перезапуска GigaCode агент использует готовую SQLite-базу.
+Перед изменением рабочих файлов installer проверяет все размеры, checksums и
+версию схемы pack, публикует SQLite атомарной заменой и запускает настоящий
+stdio MCP smoke test. После перезапуска GigaCode агент использует готовую базу.
 
 Все bundled skills лежат в одном каталоге `skills/`. Навык
 `skills/library-knowledge-workflow/` — часть обычной установки: `install.sh`
@@ -139,3 +153,9 @@ dist/knowledge-pack-<version>.zip`), поскольку `dist/` намеренн
 содержит provenance. Базовый порядок объединения — central base → module base
 → central profile → module profile; его нужно один раз сверить с реальным
 `spring.config.import` конкретного приложения.
+
+## Локальная проверка проекта
+
+```bash
+python3 -m unittest discover -s tests -v
+```

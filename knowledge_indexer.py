@@ -5,12 +5,16 @@ import argparse
 import hashlib
 import html
 import json
+import os
 import re
 import sqlite3
 import subprocess
+import tempfile
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+
+from knowledge_schema import SCHEMA_VERSION, create_schema, validate_schema
 
 try:
     import yaml
@@ -24,8 +28,9 @@ TEXT_EXTENSIONS = {".md": "markdown", ".mdx": "markdown", ".html": "html", ".htm
 LIBRARY_SUFFIXES = ("-adapter", "-model-shared", "-facade")
 LIBRARY_CONTAINER_SUFFIX = "-lib"
 SECRET_NAME = r"(?:password|secret|token|private[-_]?key|credential|api[-_]?key)"
-SECRET_KEY = re.compile(r"(?im)^(\s*" + SECRET_NAME + r"\s*[:=]).*$")
-SECRET_BLOCK_START = re.compile(r"(?i)^(\s*)" + SECRET_NAME + r"\s*:\s*[>|]")
+SECRET_PATH = r"(?:[A-Za-z0-9_.-]+[._-])?" + SECRET_NAME
+SECRET_KEY = re.compile(r"(?im)^(\s*" + SECRET_PATH + r"\s*[:=]).*$")
+SECRET_BLOCK_START = re.compile(r"(?i)^(\s*)" + SECRET_PATH + r"\s*:\s*[>|]")
 HTML_TAG = re.compile(r"</?(?:a|article|aside|br|code|details|div|em|footer|h[1-6]|header|img|li|main|nav|ol|p|pre|section|script|span|strong|style|table|tbody|td|th|thead|tr|ul)\b[^>]*>", re.IGNORECASE)
 
 
@@ -111,11 +116,20 @@ def commit(root):
 
 def clean_markup(text, language):
     if language == "markdown":
-        text = re.sub(r"\A---\s*\n.*?\n---\s*\n", "", text, flags=re.DOTALL)
+        text = re.sub(
+            r"\A---\s*\n.*?\n---\s*\n",
+            lambda match: "\n" * match.group(0).count("\n"),
+            text,
+            flags=re.DOTALL,
+        )
         text = re.sub(r"^\s*(import|export)\s+.*$", "", text, flags=re.MULTILINE)
         text = HTML_TAG.sub("", text)
     elif language == "html":
-        text = re.sub(r"(?is)<(script|style|nav|header|footer).*?</\1>", "", text)
+        text = re.sub(
+            r"(?is)<(script|style|nav|header|footer).*?</\1>",
+            lambda match: "\n" * match.group(0).count("\n"),
+            text,
+        )
         text = HTML_TAG.sub(" ", text)
         text = html.unescape(text)
     return text
@@ -131,6 +145,7 @@ def redact(text, language):
         indentation = len(line) - len(line.lstrip(" \t"))
         if skip_indent is not None:
             if line.strip() and indentation > skip_indent:
+                kept.append("\n" if line.endswith("\n") else "")
                 continue
             skip_indent = None
         block = SECRET_BLOCK_START.match(line)
@@ -142,20 +157,41 @@ def redact(text, language):
     return SECRET_KEY.sub(lambda match: match.group(1) + " <redacted>", "".join(kept))
 
 
+def normalized_chunk(lines, start, end):
+    while start < end and not lines[start].strip():
+        start += 1
+    while end > start and not lines[end - 1].strip():
+        end -= 1
+    if start == end:
+        return None
+    return "".join(lines[start:end]).strip(), start + 1, end
+
+
 def chunks(text, language, max_chars=7000):
+    """Yield chunk text and its 1-based inclusive line range."""
+    lines = text.splitlines(keepends=True)
+    if not lines:
+        return []
     if language == "markdown":
-        parts = re.split(r"(?=^#{1,3}\s)", text, flags=re.MULTILINE)
-        return [part.strip() for part in parts if len(part.strip()) >= 80]
-    if len(text) <= max_chars:
-        return [text.strip()] if text.strip() else []
-    lines, result, current = text.splitlines(keepends=True), [], ""
-    for line in lines:
-        if len(current) + len(line) > max_chars and current.strip():
-            result.append(current.strip())
-            current = ""
-        current += line
-    if current.strip():
-        result.append(current.strip())
+        headings = [index for index, line in enumerate(lines) if re.match(r"^#{1,3}\s", line)]
+        boundaries = sorted(set([0] + headings + [len(lines)]))
+        result = []
+        for start, end in zip(boundaries, boundaries[1:]):
+            chunk = normalized_chunk(lines, start, end)
+            if chunk and len(chunk[0]) >= 80:
+                result.append(chunk)
+        return result
+    result, start, size = [], 0, 0
+    for index, line in enumerate(lines):
+        if size and size + len(line) > max_chars:
+            chunk = normalized_chunk(lines, start, index)
+            if chunk:
+                result.append(chunk)
+            start, size = index, 0
+        size += len(line)
+    chunk = normalized_chunk(lines, start, len(lines))
+    if chunk:
+        result.append(chunk)
     return result
 
 
@@ -238,12 +274,23 @@ def configuration_set(root, path, configuration_roots):
 def init_db(db):
     db.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(db)
-    con.execute("DROP TABLE IF EXISTS chunks")
-    con.execute("DROP TABLE IF EXISTS configuration_values")
-    con.execute("CREATE VIRTUAL TABLE chunks USING fts5(source_id UNINDEXED, pack_id UNINDEXED, repository UNINDEXED, module UNINDEXED, path UNINDEXED, kind UNINDEXED, language UNINDEXED, configuration_set UNINDEXED, commit_sha UNINDEXED, line_start UNINDEXED, line_end UNINDEXED, title, content, tokenize='unicode61')")
-    con.execute("CREATE TABLE configuration_values (source_id TEXT NOT NULL, pack_id TEXT NOT NULL, repository TEXT NOT NULL, module TEXT NOT NULL, path TEXT NOT NULL, configuration_set TEXT NOT NULL, profile TEXT NOT NULL, layer TEXT NOT NULL, key_path TEXT NOT NULL, value_json TEXT NOT NULL)")
-    con.execute("CREATE INDEX configuration_values_lookup ON configuration_values(repository, module, configuration_set, profile, key_path)")
+    create_schema(con)
     return con
+
+
+def temporary_path(target):
+    target.parent.mkdir(parents=True, exist_ok=True)
+    handle = tempfile.NamedTemporaryFile(
+        prefix=target.name + ".", suffix=".tmp", dir=str(target.parent), delete=False
+    )
+    handle.close()
+    return Path(handle.name)
+
+
+def stage_text(target, value):
+    staged = temporary_path(target)
+    staged.write_text(value, encoding="utf-8")
+    return staged
 
 
 def value_profiles(document, path):
@@ -312,73 +359,114 @@ def index_configuration_values(con, *, text, source_id, pack, repository, module
 
 def main():
     options = args()
-    con, audit, catalog = init_db(options.db), Counter(), []
+    staged_db = temporary_path(options.db)
+    con, audit, catalog = None, Counter(), []
+    staged_catalog = None
+    staged_audit = None
+    source_revisions = []
     configuration_roots = {path.resolve() for path in options.configuration_root}
     total_sources = len(options.source)
-    for source_number, root in enumerate(options.source, 1):
-        root = root.resolve()
-        if not root.is_dir():
-            raise SystemExit("Source does not exist: %s" % root)
-        audit["sources"] += 1
-        sync_status = sync_source(root) if options.sync else "sync_not_requested"
-        audit[sync_status] += 1
-        sha, repo, modules = commit(root), root.name, discover_modules(root)
-        files_before = audit["files_seen"]
-        chunks_before = audit["chunks_indexed"]
-        values_before = audit["configuration_values_indexed"]
-        print("[%d/%d] %s: %s" % (source_number, total_sources, repo, sync_status), flush=True)
-        audit["gradle_modules_discovered"] += len(modules)
-        if options.pack == "jimmer":
-            catalog.append({"id": repo, "type": "library", "status": "ready", "aliases": [repo.replace("-", " ")], "sources": [repo + ":"], "capabilities": ["docs", "examples", "api"]})
-        for module_path, module_id in modules.items():
-            module_name = module_path.name
-            if is_library_module(module_path, module_id, modules):
-                catalog.append({"id": repo + module_id.replace(":", "-"), "type": "library", "status": "discovered", "aliases": [module_name.replace("-", " ")], "sources": [repo + module_id], "capabilities": ["api", "examples"]})
-        for path, language in walk(root):
-            if localized_docusaurus_content(root, path):
-                audit["files_skipped_localized_docusaurus_docs"] += 1
-                continue
-            audit["files_seen"] += 1
-            try:
-                raw = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                audit["files_unreadable"] += 1
-                continue
-            text = redact(clean_markup(raw, language), language).strip()
-            if language in {"markdown", "html"} and HTML_TAG.search(text):
-                audit["chunks_with_raw_html"] += 1
-            rel, module = path.relative_to(root).as_posix(), module_for(path, modules)
-            kind = "example" if "example" in rel.lower() or "test" in rel.lower() else "configuration" if language in {"yaml", "toml", "properties"} else "docs" if language in {"markdown", "html"} else "source"
-            config_set = configuration_set(root, path, configuration_roots) if kind == "configuration" else ""
-            source_base = "%s:%s" % (repo, rel)
-            if kind == "configuration" and language == "yaml":
-                count = index_configuration_values(con, text=text, source_id=source_base, pack=options.pack, repository=repo, module=module, path=Path(rel), config_set=config_set)
-                audit["configuration_values_indexed"] += count
-                if yaml is None:
-                    audit["configuration_values_skipped_no_pyyaml"] += 1
-            for position, chunk in enumerate(chunks(text, language), 1):
-                if len(chunk) < 40:
-                    audit["chunks_too_short"] += 1
+    try:
+        con = init_db(staged_db)
+        for source_number, root in enumerate(options.source, 1):
+            root = root.resolve()
+            if not root.is_dir():
+                raise SystemExit("Source does not exist: %s" % root)
+            audit["sources"] += 1
+            sync_status = sync_source(root) if options.sync else "sync_not_requested"
+            audit[sync_status] += 1
+            sha, repo, modules = commit(root), root.name, discover_modules(root)
+            files_before = audit["files_seen"]
+            chunks_before = audit["chunks_indexed"]
+            values_before = audit["configuration_values_indexed"]
+            print("[%d/%d] %s: %s" % (source_number, total_sources, repo, sync_status), flush=True)
+            audit["gradle_modules_discovered"] += len(modules)
+            if options.pack == "jimmer":
+                catalog.append({"id": repo, "type": "library", "status": "ready", "aliases": [repo.replace("-", " ")], "sources": [repo + ":"], "capabilities": ["docs", "examples", "api"]})
+            for module_path, module_id in modules.items():
+                module_name = module_path.name
+                if is_library_module(module_path, module_id, modules):
+                    catalog.append({"id": repo + module_id.replace(":", "-"), "type": "library", "status": "discovered", "aliases": [module_name.replace("-", " ")], "sources": [repo + module_id], "capabilities": ["api", "examples"]})
+            for path, language in walk(root):
+                if localized_docusaurus_content(root, path):
+                    audit["files_skipped_localized_docusaurus_docs"] += 1
                     continue
-                source_id = "%s#%d" % (source_base, position)
-                con.execute("INSERT INTO chunks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (source_id, options.pack, repo, module, rel, kind, language, config_set, sha, 1, len(chunk.splitlines()), title_for(path, chunk), chunk))
-                audit["chunks_indexed"] += 1
-        print("[%d/%d] %s: done — %d files, %d chunks, %d YAML values" % (
-            source_number, total_sources, repo,
-            audit["files_seen"] - files_before,
-            audit["chunks_indexed"] - chunks_before,
-            audit["configuration_values_indexed"] - values_before,
-        ), flush=True)
-    con.commit()
-    con.close()
-    options.catalog.parent.mkdir(parents=True, exist_ok=True)
-    lines = ["# Generated knowledge catalog", "", "Generated locally; do not edit manually.", ""]
-    for item in sorted(catalog, key=lambda value: value["id"]):
-        lines += ["## %s [%s, %s]" % (item["id"], item["type"], item["status"]), "- aliases: %s" % ", ".join(item["aliases"]), "- sources: %s" % ", ".join(item["sources"]), "- capabilities: %s" % ", ".join(item["capabilities"]), ""]
-    options.catalog.write_text("\n".join(lines), encoding="utf-8")
-    report = {"pack": options.pack, "built_at": datetime.now(timezone.utc).isoformat(), **audit, "sources_excluded": options.excluded_source, "database": str(options.db), "catalog": str(options.catalog)}
-    options.audit.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps(report, ensure_ascii=False, indent=2))
+                audit["files_seen"] += 1
+                try:
+                    raw = path.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    audit["files_unreadable"] += 1
+                    continue
+                text = redact(clean_markup(raw, language), language).rstrip()
+                if language in {"markdown", "html"} and HTML_TAG.search(text):
+                    audit["chunks_with_raw_html"] += 1
+                rel, module = path.relative_to(root).as_posix(), module_for(path, modules)
+                kind = "example" if "example" in rel.lower() or "test" in rel.lower() else "configuration" if language in {"yaml", "toml", "properties"} else "docs" if language in {"markdown", "html"} else "source"
+                config_set = configuration_set(root, path, configuration_roots) if kind == "configuration" else ""
+                source_base = "%s:%s" % (repo, rel)
+                if kind == "configuration" and language == "yaml":
+                    count = index_configuration_values(con, text=text, source_id=source_base, pack=options.pack, repository=repo, module=module, path=Path(rel), config_set=config_set)
+                    audit["configuration_values_indexed"] += count
+                    if yaml is None:
+                        audit["configuration_values_skipped_no_pyyaml"] += 1
+                for position, (chunk, line_start, line_end) in enumerate(chunks(text, language), 1):
+                    if len(chunk) < 40:
+                        audit["chunks_too_short"] += 1
+                        continue
+                    source_id = "%s#%d" % (source_base, position)
+                    con.execute("INSERT INTO chunks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (source_id, options.pack, repo, module, rel, kind, language, config_set, sha, line_start, line_end, title_for(path, chunk), chunk))
+                    audit["chunks_indexed"] += 1
+            source_revisions.append({
+                "repository": repo,
+                "commit": sha,
+                "sync_status": sync_status,
+                "files": audit["files_seen"] - files_before,
+                "chunks": audit["chunks_indexed"] - chunks_before,
+                "configuration_values": audit["configuration_values_indexed"] - values_before,
+            })
+            print("[%d/%d] %s: done — %d files, %d chunks, %d YAML values" % (
+                source_number, total_sources, repo,
+                audit["files_seen"] - files_before,
+                audit["chunks_indexed"] - chunks_before,
+                audit["configuration_values_indexed"] - values_before,
+            ), flush=True)
+        built_at = datetime.now(timezone.utc).isoformat()
+        con.execute("INSERT INTO knowledge_metadata VALUES (?, ?)", ("schema_version", str(SCHEMA_VERSION)))
+        con.execute("INSERT INTO knowledge_metadata VALUES (?, ?)", ("pack", options.pack))
+        con.execute("INSERT INTO knowledge_metadata VALUES (?, ?)", ("built_at", built_at))
+        con.commit()
+        validate_schema(con)
+        con.close()
+        con = None
+        database_sha256 = hashlib.sha256(staged_db.read_bytes()).hexdigest()
+        lines = ["# Generated knowledge catalog", "", "Generated locally; do not edit manually.", ""]
+        for item in sorted(catalog, key=lambda value: value["id"]):
+            lines += ["## %s [%s, %s]" % (item["id"], item["type"], item["status"]), "- aliases: %s" % ", ".join(item["aliases"]), "- sources: %s" % ", ".join(item["sources"]), "- capabilities: %s" % ", ".join(item["capabilities"]), ""]
+        report = {
+            "pack": options.pack,
+            "schema_version": SCHEMA_VERSION,
+            "built_at": built_at,
+            **audit,
+            "source_revisions": source_revisions,
+            "sources_excluded": options.excluded_source,
+            "database": str(options.db),
+            "database_sha256": database_sha256,
+            "catalog": str(options.catalog),
+        }
+        staged_catalog = stage_text(options.catalog, "\n".join(lines))
+        staged_audit = stage_text(options.audit, json.dumps(report, ensure_ascii=False, indent=2))
+        os.replace(str(staged_catalog), str(options.catalog))
+        staged_catalog = None
+        os.replace(str(staged_audit), str(options.audit))
+        staged_audit = None
+        os.replace(str(staged_db), str(options.db))
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    finally:
+        if con is not None:
+            con.close()
+        for path in (staged_db, staged_catalog, staged_audit):
+            if path is not None and path.exists():
+                path.unlink()
 
 
 if __name__ == "__main__":

@@ -4,9 +4,13 @@
 import argparse
 import hashlib
 import json
+import os
+import tempfile
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+from knowledge_schema import SCHEMA_VERSION, validate_database
 
 
 def digest(path):
@@ -18,29 +22,59 @@ def main():
     parser.add_argument("--db", type=Path, default=Path("knowledge.db"))
     parser.add_argument("--catalog", type=Path, default=Path("skills/library-knowledge-workflow/generated-catalog.md"))
     parser.add_argument("--audit", type=Path, default=Path("audit-summary.json"))
+    parser.add_argument("--evaluation", type=Path, default=Path("evaluation-summary.json"))
     parser.add_argument("--version", required=True)
     parser.add_argument("--output", type=Path, default=Path("dist"))
     options = parser.parse_args()
-    required = (options.db, options.catalog, options.audit)
+    required = (options.db, options.catalog, options.audit, options.evaluation)
     missing = [str(path) for path in required if not path.exists()]
     if missing:
         raise SystemExit("Cannot package missing files: " + ", ".join(missing))
     archive_files = {
         "knowledge.db": options.db,
         "generated-catalog.md": options.catalog,
-        "evaluation-summary.json": options.audit,
+        "audit-summary.json": options.audit,
+        "evaluation-summary.json": options.evaluation,
     }
+    schema_version = validate_database(options.db)
+    database_sha256 = digest(options.db)
+    audit = json.loads(options.audit.read_text(encoding="utf-8"))
+    evaluation = json.loads(options.evaluation.read_text(encoding="utf-8"))
+    if not evaluation.get("passed"):
+        raise SystemExit("Cannot package an index that failed evaluation")
+    if evaluation.get("database_sha256") != database_sha256:
+        raise SystemExit("Evaluation is stale: its database checksum does not match knowledge.db")
+    if evaluation.get("audit_sha256") != digest(options.audit):
+        raise SystemExit("Evaluation is stale: its audit checksum does not match audit-summary.json")
+    if evaluation.get("schema_version") != schema_version:
+        raise SystemExit("Evaluation schema version does not match knowledge.db")
+    if audit.get("database_sha256") != database_sha256:
+        raise SystemExit("Audit is stale: its database checksum does not match knowledge.db")
     manifest = {
         "version": options.version,
-        "built_at": datetime.now(timezone.utc).isoformat(),
+        "schema_version": SCHEMA_VERSION,
+        "pack": audit.get("pack"),
+        "index_built_at": audit.get("built_at"),
+        "packaged_at": datetime.now(timezone.utc).isoformat(),
+        "sources": audit.get("source_revisions", []),
         "files": {name: {"sha256": digest(path), "size": path.stat().st_size} for name, path in archive_files.items()},
     }
     options.output.mkdir(parents=True, exist_ok=True)
     archive = options.output / ("knowledge-pack-" + options.version + ".zip")
-    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as out:
-        for name, path in archive_files.items():
-            out.write(path, name)
-        out.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+    handle = tempfile.NamedTemporaryFile(
+        prefix=archive.name + ".", suffix=".tmp", dir=str(options.output), delete=False
+    )
+    staged_archive = Path(handle.name)
+    handle.close()
+    try:
+        with zipfile.ZipFile(staged_archive, "w", compression=zipfile.ZIP_DEFLATED) as out:
+            for name, path in archive_files.items():
+                out.write(path, name)
+            out.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+        os.replace(str(staged_archive), str(archive))
+    finally:
+        if staged_archive.exists():
+            staged_archive.unlink()
     print(archive)
 
 

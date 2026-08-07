@@ -1,8 +1,9 @@
 # Knowledge packs
 
-Один SQLite-индекс хранит несколько изолированных knowledge packs. Каждый
-chunk обязательно имеет `pack_id`, `pack_version`, `source_type`, `path`,
-`commit_sha`, `language`, `visibility` и диапазон строк исходника.
+Один SQLite-индекс может хранить записи с разными `pack_id`. Каждый chunk
+содержит repository, Gradle module, относительный path, kind, language,
+configuration set, commit SHA и реальный диапазон строк исходника. Версия
+самого распространяемого pack и список source commits находятся в manifest.
 
 ## Типы knowledge entries
 
@@ -27,9 +28,14 @@ knowledge entries.
 
 ## Обновление
 
-Локальный updater сверяет commit и content hash. Он переиндексирует только
-изменённые файлы, сохраняет предыдущий успешный index run и не публикует pack,
-если audit или evaluation не прошли.
+Текущая локальная версия полностью пересобирает индекс во временный файл.
+Существующий `knowledge.db` заменяется только после успешного завершения
+сборки, поэтому ошибка чтения source не уничтожает предыдущий рабочий индекс.
+Инкрементальная индексация по content hash остаётся задачей следующего этапа.
+
+Каждая SQLite-база имеет явную версию схемы. Runtime, verifier, packager и
+installer используют один schema contract. Pack не публикуется, если audit или
+evaluation относятся к другой базе либо evaluation завершилась неуспешно.
 
 ## Full-context internal packs
 
