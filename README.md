@@ -1,146 +1,332 @@
-# Local Library MCP
+# UVZ Local Library MCP
 
-Локальный MCP-сервер и SQLite FTS5-база знаний по используемым библиотекам.
+Локальная база знаний для GigaCode по Jimmer, внутренним библиотекам,
+приложениям, конфигурации и инженерным стандартам.
 
-## Цель
+Проект индексирует исходники в SQLite FTS5 и подключает их к агенту через
+локальный stdio MCP. Внешняя сеть и удалённый MCP-сервер не нужны.
 
-Агент работает с одним локальным MCP и получает подтверждённые ответы по
-Jimmer, внутренним backend/frontend-библиотекам, конфигурации и стандартам.
-Никакой удалённый MCP endpoint не требуется.
+## Что получает агент
 
-## Основные принципы
+- поиск по Java, Kotlin, frontend-коду, документации и примерам;
+- проверенные карточки `project-context.yaml` с назначением проекта;
+- golden path примеры из `docs/usage/*.md`;
+- точные Gradle aliases из `uvz-platform`;
+- YAML-конфигурацию из приложений и нескольких наборов `uvz-config`;
+- source id, repository, commit, path и строки для каждого ответа.
 
-- индекс и исходные репозитории остаются на рабочем компьютере;
-- каждое найденное утверждение имеет источник: pack, путь, commit и строки;
-- перед публикацией pack проходит ingestion-audit и retrieval evaluation;
-- skill содержит только workflow использования MCP, а не копии документации;
-- internal packs содержат полный полезный контекст: код, документацию,
-  конфигурацию, примеры и стандарты.
-- проверенный `project-context.yaml` и `docs/usage/*.md` имеют приоритет над
-  случайными совпадениями в исходниках.
+При поиске приоритет такой:
 
-## Стартовый scope
+1. `project-context.yaml` — назначение и границы использования;
+2. `docs/usage/*.md` — рекомендуемый способ подключения;
+3. документация и тестовые примеры;
+4. исходный код и конфигурация.
 
-Первый pack: `jimmer` — официальная документация, examples, curated use cases
-и точный API index. После его quality gate добавляем внутренние packs по одному.
+## Как устроен процесс
 
-См. [knowledge-packs.md](docs/knowledge-packs.md) и
-[ingestion-audit.md](docs/ingestion-audit.md),
-[source-sync.md](docs/source-sync.md) and
-[product-flow.md](docs/product-flow.md),
-[configuration-model.md](docs/configuration-model.md) and
-[curated-project-context.md](docs/curated-project-context.md),
-[retrieval-evaluation.md](docs/retrieval-evaluation.md).
+```text
+Исходные repositories
+        ↓
+project-context.yaml + docs/usage
+        ↓
+Индексация и quality gate
+        ↓
+knowledge-pack-<version>.zip
+        ↓
+./install.sh у разработчика
+        ↓
+GigaCode → local-library-mcp → SQLite
+```
 
-`PyYAML` is installed only for maintainer runs with `--workspace`; обычному
-developer с готовым pack он не нужен. Runtime MCP использует только стандартную
-библиотеку Python, поэтому не требует Rust, Cargo или Xcode Command Line Tools.
-Python 3.9+ подходит.
+Есть две роли:
 
-## Первая установка и индексация (maintainer)
+- **Maintainer** имеет все repositories, готовит контекст, строит и публикует
+  knowledge pack.
+- **Developer** получает этот проект с готовым pack и запускает только
+  `./install.sh`.
 
-Этот сценарий запускает только человек, который выпускает общий knowledge pack.
-Все repositories, которые нужно проиндексировать, включая `jimmer`,
-`jimmer-docs`, `jimmer-examples`, application repositories и вложенные library
-modules, должны быть отдельными Git directories внутри одной workspace-папки.
+## Требования
 
-На рабочем компьютере workspace уже определён:
+Для maintainer:
+
+- Git;
+- Python 3.9 или новее;
+- GigaCode;
+- доступ к индексируемым repositories.
+
+Для developer достаточно Python 3.9+ и GigaCode. Docker, Node.js, Rust, Cargo и
+Xcode Command Line Tools не нужны. Runtime MCP использует только стандартную
+библиотеку Python.
+
+## 1. Первая установка maintainer
+
+Все индексируемые Git repositories должны находиться внутри одной workspace:
+
+```text
+/path/to/projects/
+  uvz-local-library-mcp/
+  jimmer/
+  jimmer-docs/
+  jimmer-examples/
+  uvz-platform/
+  uvz-config/
+  schedulex/
+  other-projects/
+```
+
+Клонируй MCP-проект:
 
 ```bash
 PROJECTS=/path/to/projects
 cd "$PROJECTS"
 git clone git@github.com:asimmetria/uvz-local-library-mcp.git
 cd uvz-local-library-mcp
+```
 
+Первичная индексация одновременно установит MCP и основной skill:
+
+```bash
 ./install.sh \
   --workspace "$PROJECTS" \
   --sync \
   --configuration-root "$PROJECTS/uvz-config"
 ```
 
-Installer сначала использует `$GIGACODE_HOME/.venv/bin/python`, если он есть;
-на рабочем окружении это Python GigaCode. При нестандартной установке можно
-выбрать interpreter явно: `PYTHON_BIN=/path/to/python3.13 ./install.sh ...`.
-При synthetic/non-writable `$HOME` installer ищет `.gigacode` в родительских
-папках проекта и хранит runtime в `.mcp-runtime` рядом с самим MCP-проектом.
-Пути можно переопределить через `GIGACODE_HOME` и `MCP_RUNTIME_HOME`.
-Если в корпоративном Python есть `pip`, но нет `python3-venv`, installer
-автоматически устанавливает зависимости в локальную `.mcp-runtime` через
-`pip --target`; права `sudo` и пакет `python3-venv` не нужны.
-
-`--workspace` сам находит **каждый Git repository** под `$PROJECTS` и передаёт
-его в indexer один раз. Поэтому `jimmer-docs` отдельно указывать не нужно: если
-он лежит рядом с остальными projects, он уже войдёт в pack.
-
-`--configuration-root` не добавляет repository повторно. Он лишь сообщает, что
-`uvz-config` — central configuration source: его вложенные папки становятся
-отдельными `configuration_set` для `resolve_config`.
-
-`--sync` для чистых checkout-ов делает `fetch`, определяет основную ветку из
-`origin/HEAD` (с запасными вариантами `master`, затем `main`), переключается на
-неё и выполняет `pull --ff-only`. Repository с локальными commits/изменениями
-не изменяется; причина записывается в audit.
-
-Чтобы не индексировать отдельные repositories, создай рядом с `install.sh`
-локальный `index-exclude.txt`: по одному **точному имени Git-директории** на
-строку, комментарии начинаются с `#`. Файл ignored Git и автоматически
-применяется при `--workspace`; итоговый audit содержит `sources_excluded`.
-Шаблон: `index-exclude.example.txt`. Для другого расположения используй
-`--exclude-file /path/to/list.txt` или переменную `INDEX_EXCLUDE_FILE`.
-
-После сборки `install.sh` автоматически запускает проверку схемы SQLite,
-целостности, диапазонов строк, HTML-мусора и возможных секретов. Отчёт
-записывается в `evaluation-summary.json`. При провале проверки installer
-завершается с ошибкой, а предыдущая рабочая база не перезаписывается.
-Также выполняется `evaluation-cases.json`: пять реальных Jimmer-вопросов и один
-проверочный запрос на отсутствие выдуманного API. Gate считает Recall@5, MRR и
-долю корректных пустых результатов.
-
-Если в индексируемом repository есть `project-context.yaml`, он обязан
-соответствовать schema version 1 и содержать существующие repository-relative
-evidence paths. Ошибка в карточке останавливает сборку до публикации. Валидные
-карточки и `docs/usage/*.md` получают отдельные типы `context`/`usage` и
-поднимаются выше обычного кода в результатах поиска.
-
-Дополнительные обязательные поисковые ожидания можно проверить вручную:
+Если рабочая ОС использует нестандартные домашнюю папку и Python:
 
 ```bash
-python3 verify_index.py \
-  --db knowledge.db \
-  --audit audit-summary.json \
-  --cases evaluation-cases.json \
-  --expect fetcher \
-  --output evaluation-summary.json
+GIGACODE_HOME="/path/to/.gigacode" \
+MCP_RUNTIME_HOME="/path/to/projects/.mcp-runtime" \
+PYTHON_BIN="/path/to/.gigacode/.venv/bin/python" \
+./install.sh \
+  --workspace "/path/to/projects" \
+  --sync \
+  --configuration-root "/path/to/projects/uvz-config"
 ```
 
-Затем maintainer публикует готовый pack:
+После установки перезапусти GigaCode.
+
+### Что делает `--workspace`
+
+- находит каждый Git repository рекурсивно и индексирует его один раз;
+- обнаруживает Gradle-модули, в том числе библиотеки внутри приложений;
+- отдельно индексирует Jimmer docs/examples;
+- для Docusaurus пропускает переводы из `i18n`, если есть канонические docs;
+- строит новый индекс во временной папке;
+- заменяет рабочую базу только после успешных проверок.
+
+`--configuration-root` не индексирует repository повторно. Он помечает
+центральный конфигурационный repository и его наборы конфигураций.
+
+## 2. Подготовка `project-context.yaml`
+
+Authoring skill устанавливается только maintainer-у:
+
+```bash
+./scripts/install-project-context-authoring.sh
+```
+
+После установки перезапусти GigaCode. Открывай по одному Git repository, а не
+всю workspace сразу.
+
+### Готовый промт для полного пересоздания контекста
+
+Перед запуском желательно иметь чистый working tree или отдельный commit.
+Промт удаляет только старые карточки и usage-файлы, на которые они ссылаются.
+
+```text
+$project-context-authoring
+
+Работай только внутри текущего Git repository. Не выходи в соседние проекты и
+не коммить изменения. Цель — полностью пересоздать контекст repository по
+schema_version: 1.
+
+Сначала проверь, что тебе доступен инструмент запуска субагентов/Task. Если он
+недоступен, остановись до удаления файлов и сообщи об этом.
+
+Алгоритм:
+
+1. Проверь git status. Если есть изменения, не относящиеся к старым
+   project-context.yaml или docs/usage, остановись и перечисли их.
+
+2. Найди все build roots и модули: settings.gradle(.kts), build.gradle(.kts),
+   pom.xml, package.json и вложенные самостоятельные проекты. Учитывай
+   библиотеки внутри application repository, даже если приложение их сейчас не
+   подключает. Модули с суффиксами adapter, facade, model-shared и lib считай
+   обязательными кандидатами, но классификацию подтверждай исходниками.
+
+3. До удаления прочитай все старые project-context.yaml. Собери:
+   - их пути;
+   - все пути из examples в старом и новом формате;
+   - связи library-suite → components.
+
+4. Построй список целевых единиц. На каждую независимо подключаемую library,
+   deployable application и consumer-facing support-module должна приходиться
+   отдельная карточка. Внутренний технический модуль можно пропустить только с
+   доказательством. db-scripts получает карточку support-module только если его
+   подключают consumers для grants, DDL, fixtures или тестовой базы.
+
+5. Только после построения списка удали:
+   - все найденные project-context.yaml;
+   - только те docs/usage/*.md, которые были указаны в examples удалённых
+     карточек.
+   Не удаляй README, исходники, build-файлы, тесты, миграции и другие docs.
+
+6. Запусти отдельного субагента для каждой целевой единицы. Не запускай больше
+   разрешённого системой числа одновременно; обрабатывай очередями. Каждый
+   субагент владеет только директорией своего модуля и не изменяет файлы других
+   модулей.
+
+Передай каждому субагенту инструкцию:
+
+   $project-context-authoring
+
+   Исследуй только назначенный модуль. По исходникам, public API,
+   auto-configuration, ConfigurationProperties, tests и реальным consumers
+   определи kind. Создай project-context.yaml schema version 1 и 1–3
+   docs/usage/*.md только для доказанных golden paths. Все пояснения пиши
+   по-русски, технические identifiers не переводи. Evidence paths должны быть
+   существующими и относительными корню Git repository. Не используй абсолютные
+   пути. Не выдумывай API, configuration keys, ограничения, Bitbucket URL и
+   dependency alias. Для внутренней Gradle dependency сначала вызови MCP
+   suggest_dependency и используй только подтверждённый libs alias без версии.
+   Неподтверждённое запиши в unknowns. Не меняй production-код, build-файлы,
+   тесты или миграции. В конце верни список файлов, evidence и unknowns.
+
+7. Сначала дождись карточек дочерних модулей. После этого отдельным субагентом
+   создай root project-context.yaml. Для library-suite root-карточка должна
+   только перечислять components и не дублировать их API, dependency,
+   configuration и examples.
+
+8. После завершения всех субагентов самостоятельно проверь:
+   - одна independently consumable/deployable единица — одна карточка;
+   - все component/example/evidence paths существуют;
+   - usage содержит все обязательные разделы и реальный Evidence path;
+   - нет абсолютных локальных путей;
+   - весь пояснительный текст на русском;
+   - Gradle aliases подтверждены uvz-platform;
+   - production-файлы не изменены.
+
+9. Найди рядом с загруженным skill скрипт
+   scripts/validate-project-context.sh и запусти его для корня текущего
+   repository. Исправь все ошибки. Не объявляй работу завершённой при failed
+   validation.
+
+10. В финале отчитайся:
+    - сколько build roots и модулей найдено;
+    - сколько карточек и usage-файлов создано;
+    - какие модули пропущены и почему;
+    - какие unknowns должен подтвердить владелец.
+```
+
+Такой сценарий безопаснее выполнять для одного repository за запуск. Субагенты
+могут работать параллельно, потому что каждый изменяет только свою директорию;
+root suite создаётся последней.
+
+### Проверка одного repository без индексации
+
+```bash
+python3 validate_project_contexts.py /path/to/project
+```
+
+Проверяются schema, русский текст, типы полей, структура suite, обязательные
+разделы usage и существование всех относительных evidence paths.
+
+Перед индексацией просмотри изменения и закоммить карточки в их repositories.
+Индексатор читает текущий working tree, но provenance содержит commit `HEAD`,
+поэтому для воспроизводимого pack контекст и usage должны входить в этот commit.
+
+```bash
+git status --short
+git diff -- .
+```
+
+## 3. Полная переиндексация
+
+После подготовки карточек повтори maintainer-команду:
+
+```bash
+cd /path/to/projects/uvz-local-library-mcp
+
+./install.sh \
+  --workspace "/path/to/projects" \
+  --sync \
+  --configuration-root "/path/to/projects/uvz-config"
+```
+
+Успешная сборка создаёт:
+
+- `knowledge.db`;
+- `audit-summary.json`;
+- `evaluation-summary.json`;
+- `evaluation-cases.built.json`;
+- `skills/library-knowledge-workflow/generated-catalog.md`.
+
+Если хотя бы одна карточка невалидна или quality gate не пройден, предыдущая
+рабочая база не заменяется.
+
+### Исключение repositories
+
+Скопируй шаблон и укажи точные имена директорий, по одному на строку:
+
+```bash
+cp index-exclude.example.txt index-exclude.txt
+```
+
+Пример:
+
+```text
+old-project
+experimental-service
+```
+
+`index-exclude.txt` не коммитится и автоматически применяется при индексации.
+
+### Обновление исходников
+
+Обычный `--sync` безопасен: dirty repositories и ветки с локальными commits он
+не меняет, а причину записывает в audit.
+
+Принудительное обновление всех repositories выполняется отдельно:
+
+```bash
+./scripts/force-sync-all.sh /path/to/projects
+./scripts/force-sync-all.sh /path/to/projects --apply
+```
+
+Первая команда — dry run. Вторая переключает каждый repository на
+`origin/master` или `origin/main` и удаляет локальные tracked-изменения. Она
+ничего не push-ит и не удаляет untracked-файлы.
+
+## 4. Создание knowledge pack
+
+После успешной индексации:
 
 ```bash
 python3 package_pack.py --version YYYY.MM.DD
 ```
 
-Упаковщик принимает только базу, для которой существуют совпадающие по
-SHA-256 успешные `audit-summary.json` и `evaluation-summary.json`. Manifest
-содержит версию схемы и commit каждого исходного repository.
+Результат:
 
-Для внутреннего набора вопросов скопируй формат в ignored-файл
-`evaluation-cases.local.json`, добавь ожидаемые `repository:path` и передай его
-при сборке:
-
-```bash
-./install.sh \
-  --workspace /path/to/projects \
-  --evaluation-cases evaluation-cases.local.json
+```text
+dist/knowledge-pack-YYYY.MM.DD.zip
 ```
 
-Тот же файл автоматически попадёт в pack, чтобы результат можно было
-воспроизвести.
+Pack содержит SQLite, catalog, manifest, audit, evaluation и точный набор
+retrieval cases. Упаковка блокируется, если отчёты относятся к другой базе или
+quality gate не пройден.
 
-## Установка для разработчика
+Внутренний индекс содержит производные от исходников данные. Публикуй pack
+только во внутренний Bitbucket/artifact storage. Не добавляй внутренний pack в
+публичный GitHub repository.
 
-Для команды рекомендуется один закрытый Bitbucket-репозиторий-дистрибутив:
-тот же код MCP и опубликованный `dist/knowledge-pack-<version>.zip` в нём.
-Разработчик не клонирует projects и не запускает индексацию:
+Рекомендуемый способ распространения — положить versioned ZIP в `dist/` этого
+же проекта во внутреннем Bitbucket. Тогда разработчик клонирует только один
+repository.
+
+## 5. Установка у разработчика
+
+Внутренний repository уже должен содержать `dist/knowledge-pack-<version>.zip`:
 
 ```bash
 git clone <internal-bitbucket>/uvz-local-library-mcp.git
@@ -148,49 +334,52 @@ cd uvz-local-library-mcp
 ./install.sh
 ```
 
-Без `--workspace` и `--knowledge-pack` installer сам выберет самый новый
-`dist/knowledge-pack-*.zip`. Он ставит локальный stdio MCP и generic skill.
-Перед изменением рабочих файлов installer проверяет все размеры, checksums и
-версию схемы pack, публикует SQLite атомарной заменой и запускает настоящий
-stdio MCP smoke test. После перезапуска GigaCode агент использует готовую базу.
+Installer автоматически:
 
-Все bundled skills лежат в одном каталоге `skills/`. Навык
-`skills/library-knowledge-workflow/` — часть обычной установки: `install.sh`
-автоматически создаёт для него симлинк
-`$GIGACODE_HOME/skills/library-knowledge-workflow`.
+1. выбирает самый новый bundled pack;
+2. проверяет schema, размеры и SHA-256;
+3. атомарно устанавливает SQLite и отчёты;
+4. добавляет `local-library-mcp` в GigaCode settings;
+5. устанавливает основной `library-knowledge-workflow` skill;
+6. запускает настоящий stdio MCP smoke test.
 
-### Необязательный skill для подготовки документации
+После установки перезапусти GigaCode и проверь `/mcp`.
 
-`skills/project-context-authoring/` содержит personal skill для владельцев
-библиотек: он создаёт `project-context.yaml` и `docs/usage`. Он намеренно не
-устанавливается автоматически обычным developer. Владелец подключает его
-вручную командой `./scripts/install-project-context-authoring.sh`; она создаёт
-симлинк в `$GIGACODE_HOME/skills/project-context-authoring`. Его scripts
-`list-gradle-projects.sh` и `run-project-context.sh` запускают GigaCode по
-одному выбранному репозиторию, а не по всему workspace. После авторинга
-карточки можно проверить без полной индексации:
+Проверочный промт:
 
-```bash
-python3 validate_project_contexts.py /path/to/one-project
+```text
+Используя local-library-mcp, найди пример Jimmer Fetcher. Назови repository,
+source id, path, commit и кратко объясни, что делает пример. Не отвечай без
+ссылки на источник из локальной базы.
 ```
 
-`run-project-context.sh` выполняет эту проверку автоматически после завершения
-GigaCode.
+Developer не запускает индексацию и не устанавливает authoring skill.
 
-Maintainer добавляет новый pack в закрытый repository явно (`git add -f
-dist/knowledge-pack-<version>.zip`), поскольку `dist/` намеренно ignored в
-публичном исходном repository. Если pack распространяется отдельно, его можно
-указать явно: `./install.sh --knowledge-pack /path/to/pack.zip`.
+## MCP-инструменты
 
-Для YAML доступны два разных инструмента: `search_config` показывает исходные
-файлы, а `resolve_config` собирает leaf-values для `application`,
-`configuration_set`, optional `module` и Spring `profile`. Его ответ всегда
-содержит provenance. Базовый порядок объединения — central base → module base
-→ central profile → module profile; его нужно один раз сверить с реальным
-`spring.config.import` конкретного приложения.
+| Инструмент | Назначение |
+| --- | --- |
+| `search_knowledge` | Поиск context, usage, docs, examples и source |
+| `get_source` | Чтение полного найденного chunk |
+| `list_libraries` | Каталог библиотек, приложений и возможностей |
+| `list_repositories` | Все repositories и количество проиндексированных данных |
+| `suggest_dependency` | Подтверждённый `libs.<alias>` из `uvz-platform` |
+| `search_config` | Поиск исходных YAML/config-файлов |
+| `resolve_config` | Расчёт effective configuration с provenance |
+| `index_status` | Audit последней индексации |
 
-## Локальная проверка проекта
+## Проверка проекта MCP
 
 ```bash
 python3 -m unittest discover -s tests -v
+python3 smoke_test.py
 ```
+
+## Дополнительная документация
+
+- [Модель project context](docs/curated-project-context.md)
+- [Quality gate](docs/ingestion-audit.md)
+- [Knowledge packs](docs/knowledge-packs.md)
+- [Retrieval evaluation](docs/retrieval-evaluation.md)
+- [Конфигурация](docs/configuration-model.md)
+- [Синхронизация исходников](docs/source-sync.md)
