@@ -278,7 +278,10 @@ experimental-service
 ### Обновление исходников
 
 Обычный `--sync` безопасен: dirty repositories и ветки с локальными commits он
-не меняет, а причину записывает в audit.
+не обновляет через Git, а причину записывает в audit. Это не исключает их из
+индексации: после `sync_skipped_dirty` индексатор читает текущий working tree,
+включая незакоммиченные `project-context.yaml` и `docs/usage/*.md`. Строка
+`done — ... files, ... chunks` подтверждает, что repository проиндексирован.
 
 Принудительное обновление всех repositories выполняется отдельно:
 

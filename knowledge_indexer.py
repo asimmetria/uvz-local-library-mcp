@@ -122,6 +122,12 @@ def sync_source(root):
     return "synced"
 
 
+def sync_progress(status):
+    if status == "sync_skipped_dirty":
+        return status + " (sync skipped; indexing current dirty working tree)"
+    return status
+
+
 def commit(root):
     code, value, _ = git(root, "rev-parse", "HEAD")
     return value if code == 0 else "not-a-git-repository"
@@ -522,7 +528,11 @@ def main():
             files_before = audit["files_seen"]
             chunks_before = audit["chunks_indexed"]
             values_before = audit["configuration_values_indexed"]
-            print("[%d/%d] %s: %s" % (source_number, total_sources, repo, sync_status), flush=True)
+            print(
+                "[%d/%d] %s: %s"
+                % (source_number, total_sources, repo, sync_progress(sync_status)),
+                flush=True,
+            )
             audit["gradle_modules_discovered"] += len(modules)
             owner_candidates.append(owner_candidate(repo, ":", (repo,), priority=2))
             for module_path, module_id in modules.items():

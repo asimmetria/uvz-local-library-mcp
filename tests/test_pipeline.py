@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from dependency_graph import find_alias_usages, parse_version_catalog  # noqa: E402
-from knowledge_indexer import chunks, redact  # noqa: E402
+from knowledge_indexer import chunks, redact, sync_progress  # noqa: E402
 from knowledge_schema import KnowledgeSchemaError, SCHEMA_VERSION, create_schema, validate_database  # noqa: E402
 from project_context import validate_card  # noqa: E402
 from retrieval_evaluator import evaluate_dependency_graph  # noqa: E402
@@ -60,6 +60,11 @@ class KnowledgePipelineTest(unittest.TestCase):
         split = chunks(large, "kotlin", max_chars=180)
         self.assertGreater(len(split), 1)
         self.assertTrue(any(part.startswith("class Second") for part, _, _ in split))
+        self.assertEqual(
+            "sync_skipped_dirty (sync skipped; indexing current dirty working tree)",
+            sync_progress("sync_skipped_dirty"),
+        )
+        self.assertEqual("synced", sync_progress("synced"))
 
     def test_structured_catalog_and_comment_free_usage_extraction(self):
         catalog = parse_version_catalog(
