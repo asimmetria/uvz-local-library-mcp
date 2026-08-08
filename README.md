@@ -139,9 +139,9 @@ file-editing policy через heredoc или перенаправление в�
 repository:
 
 ```bash
-cd "/home/work/21498149@sigma.sbrf.ru/projects/uvz-local-library-mcp"
+cd /path/to/projects/uvz-local-library-mcp
 ./skills/project-context-authoring/scripts/run-all-project-contexts.sh \
-  "/home/work/21498149@sigma.sbrf.ru/projects"
+  "/path/to/projects"
 ```
 
 Другой разработчик заменяет абсолютные пути на свои.
@@ -192,9 +192,9 @@ authoring-кампания его не обрабатывает. `index-exclude.
 authoring.
 
 ```bash
-cd "/home/work/21498149@sigma.sbrf.ru/projects/uvz-local-library-mcp"
+cd /path/to/projects/uvz-local-library-mcp
 ./skills/project-context-authoring/scripts/run-all-project-contexts.sh \
-  "/home/work/21498149@sigma.sbrf.ru/projects" --restart
+  "/path/to/projects" --restart
 ```
 
 ### Восстановление state после старого validator workflow
@@ -204,9 +204,9 @@ failed after the agent session`, поэтому повторная попытк�
 исправлять. После обновления один раз верни только такие записи в очередь:
 
 ```bash
-cd "/home/work/21498149@sigma.sbrf.ru/projects/uvz-local-library-mcp"
+cd /path/to/projects/uvz-local-library-mcp
 ./skills/project-context-authoring/scripts/run-all-project-contexts.sh \
-  "/home/work/21498149@sigma.sbrf.ru/projects" \
+  "/path/to/projects" \
   --reset-validation-failures
 ```
 
@@ -219,9 +219,9 @@ agent session. В следующих запусках этот флаг не н�
 раз восстанови только такие прерванные записи:
 
 ```bash
-cd "/home/work/21498149@sigma.sbrf.ru/projects/uvz-local-library-mcp"
+cd /path/to/projects/uvz-local-library-mcp
 ./skills/project-context-authoring/scripts/run-all-project-contexts.sh \
-  "/home/work/21498149@sigma.sbrf.ru/projects" \
+  "/path/to/projects" \
   --reset-interrupted-failures
 ```
 
@@ -232,10 +232,10 @@ Controller сначала переводит stale `running` в interrupted `fai
 Если raw live JSON слишком шумный, переключи вывод на обычный текст:
 
 ```bash
-cd "/home/work/21498149@sigma.sbrf.ru/projects/uvz-local-library-mcp"
+cd /path/to/projects/uvz-local-library-mcp
 PROJECT_CONTEXT_OUTPUT_FORMAT=text \
   ./skills/project-context-authoring/scripts/run-all-project-contexts.sh \
-  "/home/work/21498149@sigma.sbrf.ru/projects"
+  "/path/to/projects"
 ```
 
 В `text`-режиме GigaCode печатает полный ответ только после завершения сессии.
