@@ -133,24 +133,17 @@ file-editing policy через heredoc или перенаправление в�
 
 ### Последовательная обработка всей workspace
 
-На рабочей станции maintainer-а используются следующие пути:
-
-```bash
-WORKSPACE="/home/work/21498149@sigma.sbrf.ru/projects"
-MCP_REPOSITORY="$WORKSPACE/uvz-local-library-mcp"
-```
-
 Перед запуском проверь через `/mcp`, что `local-library-mcp` подключён и
 показывает campaign tools `project_context_campaign_next`, `start`, `finish` и
 `report`. Затем запусти runner из MCP repository:
 
 ```bash
-cd "$MCP_REPOSITORY"
-./skills/project-context-authoring/scripts/run-all-project-contexts.sh "$WORKSPACE"
+cd "/home/work/21498149@sigma.sbrf.ru/projects/uvz-local-library-mcp"
+./skills/project-context-authoring/scripts/run-all-project-contexts.sh \
+  "/home/work/21498149@sigma.sbrf.ru/projects"
 ```
 
-Другой разработчик заменяет только значения `WORKSPACE` и `MCP_REPOSITORY` на
-свои абсолютные пути.
+Другой разработчик заменяет абсолютные пути на свои.
 
 Runner:
 
@@ -183,17 +176,18 @@ State локален и игнорируется Git:
 перезапуска используй `--restart`: старый state копируется в timestamped backup.
 
 ```bash
-cd "$MCP_REPOSITORY"
+cd "/home/work/21498149@sigma.sbrf.ru/projects/uvz-local-library-mcp"
 ./skills/project-context-authoring/scripts/run-all-project-contexts.sh \
-  "$WORKSPACE" --restart
+  "/home/work/21498149@sigma.sbrf.ru/projects" --restart
 ```
 
 Если raw live JSON слишком шумный, переключи вывод на обычный текст:
 
 ```bash
+cd "/home/work/21498149@sigma.sbrf.ru/projects/uvz-local-library-mcp"
 PROJECT_CONTEXT_OUTPUT_FORMAT=text \
   ./skills/project-context-authoring/scripts/run-all-project-contexts.sh \
-  "$WORKSPACE"
+  "/home/work/21498149@sigma.sbrf.ru/projects"
 ```
 
 Один repository можно обработать отдельно. В этом точечном режиме прежняя
