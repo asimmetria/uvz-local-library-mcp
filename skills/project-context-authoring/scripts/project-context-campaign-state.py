@@ -18,6 +18,7 @@ from typing import Any
 SCHEMA_VERSION = 1
 MAX_ATTEMPTS = 2
 VALIDATION_FAILURE_PREFIX = "Deterministic validation failed after the agent session."
+INTERRUPTED_FAILURE_MESSAGE = "Предыдущая сессия прервалась во время попытки."
 
 
 def utc_now() -> str:
@@ -178,7 +179,7 @@ def command_init(arguments: argparse.Namespace) -> int:
                     "Прерванная сессия изменила файлы вне project-context.yaml и docs/usage/*.md."
                 )
             else:
-                record["last_message"] = "Предыдущая сессия прервалась во время попытки."
+                record["last_message"] = INTERRUPTED_FAILURE_MESSAGE
         records.append(record)
 
     state = {
@@ -203,11 +204,25 @@ def find_record(state: dict[str, Any], repository: str) -> dict[str, Any]:
 
 
 def is_eligible(record: dict[str, Any]) -> bool:
-    return record.get("status") != "successful" and int(record.get("attempts", 0)) < MAX_ATTEMPTS
+    return (
+        record.get("status") in {"pending", "failed"}
+        and int(record.get("attempts", 0)) < MAX_ATTEMPTS
+    )
 
 
 def command_next(arguments: argparse.Namespace) -> int:
     state = load_state(Path(arguments.state).expanduser().resolve())
+    running = [
+        record for record in state.get("repositories", [])
+        if record.get("status") == "running"
+    ]
+    if running:
+        print(json.dumps({
+            "error": "ACTIVE_REPOSITORY_MUST_BE_FINISHED",
+            "repository": running[0]["path"],
+            "running_count": len(running),
+        }, ensure_ascii=False))
+        return 11
     for record in state.get("repositories", []):
         if is_eligible(record):
             result = {**record, "next_attempt": int(record.get("attempts", 0)) + 1}
@@ -222,8 +237,21 @@ def command_start(arguments: argparse.Namespace) -> int:
     state = load_state(state_path)
     record = find_record(state, arguments.repository)
     attempts = int(record.get("attempts", 0))
+    running = [
+        item for item in state.get("repositories", [])
+        if item.get("status") == "running"
+    ]
+    if running:
+        raise SystemExit(
+            "Finish the active repository before start: %s" % running[0]["path"]
+        )
     if record.get("status") == "successful":
         raise SystemExit(f"Repository is already successful: {record['path']}")
+    if record.get("status") not in {"pending", "failed"}:
+        raise SystemExit(
+            "Repository status does not allow start: %s: %s"
+            % (record["path"], record.get("status"))
+        )
     if attempts >= MAX_ATTEMPTS:
         raise SystemExit(f"Attempt limit ({MAX_ATTEMPTS}) reached: {record['path']}")
     record.update({
@@ -348,6 +376,33 @@ def command_reset_validation_failures(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def command_reset_interrupted_failures(arguments: argparse.Namespace) -> int:
+    """Repair stale running records created before the single-active invariant."""
+    state_path = Path(arguments.state).expanduser().resolve()
+    state = load_state(state_path)
+    reset = []
+    for record in state.get("repositories", []):
+        if (
+            record.get("status") != "failed"
+            or record.get("last_message") != INTERRUPTED_FAILURE_MESSAGE
+        ):
+            continue
+        record.update({
+            "status": "pending",
+            "attempts": 0,
+            "started_at": None,
+            "completed_at": None,
+            "last_message": "Retry after single-active campaign state repair.",
+            "changed_outside_scope": [],
+            "repair_resets": int(record.get("repair_resets", 0)) + 1,
+        })
+        record.pop("safety_baseline", None)
+        reset.append(record["path"])
+    save_state(state_path, state)
+    print(json.dumps({"reset": len(reset), "repositories": reset}, ensure_ascii=False))
+    return 0
+
+
 def command_check(arguments: argparse.Namespace) -> int:
     state = load_state(Path(arguments.state).expanduser().resolve())
     result = summary(state)
@@ -405,6 +460,10 @@ def parser() -> argparse.ArgumentParser:
     reset_validation = subparsers.add_parser("reset-validation-failures")
     reset_validation.add_argument("--state", required=True)
     reset_validation.set_defaults(handler=command_reset_validation_failures)
+
+    reset_interrupted = subparsers.add_parser("reset-interrupted-failures")
+    reset_interrupted.add_argument("--state", required=True)
+    reset_interrupted.set_defaults(handler=command_reset_interrupted_failures)
     return result
 
 

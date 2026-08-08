@@ -296,7 +296,8 @@ class KnowledgePipelineTest(unittest.TestCase):
             retry = workspace / "retry-project"
             unsafe = workspace / "unsafe-project"
             validation = workspace / "validation-project"
-            for project in (retry, unsafe, validation):
+            interrupted = workspace / "interrupted-project"
+            for project in (retry, unsafe, validation, interrupted):
                 project.mkdir(parents=True)
                 (project / "README.md").write_text("# Fixture\n", encoding="utf-8")
                 subprocess.run(["git", "init", str(project)], check=True, capture_output=True)
@@ -323,12 +324,24 @@ class KnowledgePipelineTest(unittest.TestCase):
                 )
 
             campaign("init", "--workspace", workspace, "--state", state)
-            for attempt in range(2):
-                campaign("start", "--state", state, "--repository", retry)
-                campaign(
-                    "finish", "--state", state, "--repository", retry,
-                    "--status", "failed", "--message", f"attempt {attempt + 1}",
-                )
+            campaign("start", "--state", state, "--repository", retry)
+            blocked_next = campaign("next", "--state", state, check=False)
+            self.assertEqual(11, blocked_next.returncode)
+            self.assertIn("ACTIVE_REPOSITORY_MUST_BE_FINISHED", blocked_next.stdout)
+            blocked_start = campaign(
+                "start", "--state", state, "--repository", unsafe, check=False
+            )
+            self.assertNotEqual(0, blocked_start.returncode)
+            self.assertIn("Finish the active repository", blocked_start.stderr)
+            campaign(
+                "finish", "--state", state, "--repository", retry,
+                "--status", "failed", "--message", "attempt 1",
+            )
+            campaign("start", "--state", state, "--repository", retry)
+            campaign(
+                "finish", "--state", state, "--repository", retry,
+                "--status", "failed", "--message", "attempt 2",
+            )
             third = campaign(
                 "start", "--state", state, "--repository", retry, check=False
             )
@@ -385,6 +398,26 @@ class KnowledgePipelineTest(unittest.TestCase):
             self.assertEqual("pending", records["validation-project"]["status"])
             self.assertEqual(0, records["validation-project"]["attempts"])
             self.assertEqual(1, records["validation-project"]["repair_resets"])
+
+            campaign("start", "--state", state, "--repository", interrupted)
+            campaign("init", "--workspace", workspace, "--state", state)
+            records = {
+                item["name"]: item
+                for item in json.loads(state.read_text(encoding="utf-8"))["repositories"]
+            }
+            self.assertEqual("failed", records["interrupted-project"]["status"])
+            self.assertEqual(
+                "Предыдущая сессия прервалась во время попытки.",
+                records["interrupted-project"]["last_message"],
+            )
+            repaired = campaign("reset-interrupted-failures", "--state", state)
+            self.assertEqual(1, json.loads(repaired.stdout)["reset"])
+            records = {
+                item["name"]: item
+                for item in json.loads(state.read_text(encoding="utf-8"))["repositories"]
+            }
+            self.assertEqual("pending", records["interrupted-project"]["status"])
+            self.assertEqual(0, records["interrupted-project"]["attempts"])
             report = server_module.call_tool(
                 "project_context_campaign_report", {"state_file": str(state)}
             )

@@ -202,6 +202,21 @@ cd "/home/work/21498149@sigma.sbrf.ru/projects/uvz-local-library-mcp"
 записей начинается новый лимит из двух попыток уже с validator feedback внутри
 agent session. В следующих запусках этот флаг не нужен.
 
+Версии до single-active state invariant могли оставить несколько repositories
+в `running`, если агент вызвал `next/start` до `finish`. После обновления один
+раз восстанови только такие прерванные записи:
+
+```bash
+cd "/home/work/21498149@sigma.sbrf.ru/projects/uvz-local-library-mcp"
+./skills/project-context-authoring/scripts/run-all-project-contexts.sh \
+  "/home/work/21498149@sigma.sbrf.ru/projects" \
+  --reset-interrupted-failures
+```
+
+Controller сначала переводит stale `running` в interrupted `failed`, затем
+возвращает только их в `pending`. Успешные repositories и failures с другими
+причинами не меняются. Новая версия запрещает второй `running` технически.
+
 Если raw live JSON слишком шумный, переключи вывод на обычный текст:
 
 ```bash

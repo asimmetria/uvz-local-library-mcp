@@ -2,14 +2,16 @@
 # Run one primary GigaCode agent across all non-excluded repositories.
 set -Eeuo pipefail
 
-WORKSPACE="${1:?Usage: $0 /path/to/projects [--restart] [--reset-validation-failures]}"
+WORKSPACE="${1:?Usage: $0 /path/to/projects [--restart] [--reset-validation-failures] [--reset-interrupted-failures]}"
 shift
 RESTART=0
 RESET_VALIDATION_FAILURES=0
+RESET_INTERRUPTED_FAILURES=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --restart) RESTART=1 ;;
     --reset-validation-failures) RESET_VALIDATION_FAILURES=1 ;;
+    --reset-interrupted-failures) RESET_INTERRUPTED_FAILURES=1 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
@@ -52,6 +54,9 @@ fi
 "$PYTHON" "$STATE_TOOL" "${INIT_ARGS[@]}"
 if [ "$RESET_VALIDATION_FAILURES" = "1" ]; then
   "$PYTHON" "$STATE_TOOL" reset-validation-failures --state "$STATE_FILE"
+fi
+if [ "$RESET_INTERRUPTED_FAILURES" = "1" ]; then
+  "$PYTHON" "$STATE_TOOL" reset-interrupted-failures --state "$STATE_FILE"
 fi
 
 PROMPT="$(<"$PROMPT_FILE")"
