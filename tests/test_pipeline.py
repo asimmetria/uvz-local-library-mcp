@@ -469,6 +469,17 @@ class KnowledgePipelineTest(unittest.TestCase):
                 "project_context_campaign_report", {"state_file": str(state)}
             )
             self.assertIn('"terminal_failed": 2', report[0]["text"])
+            report_payload = json.loads(report[0]["text"])
+            failed_by_name = {
+                item["name"]: item
+                for item in report_payload["failed_repositories"]
+            }
+            self.assertEqual(
+                {"retry-project", "unsafe-project"}, set(failed_by_name)
+            )
+            self.assertEqual("attempt 2", failed_by_name["retry-project"]["last_message"])
+            self.assertTrue(failed_by_name["retry-project"]["terminal"])
+            self.assertEqual(2, failed_by_name["unsafe-project"]["attempts"])
 
     def test_project_context_rejects_non_portable_or_missing_evidence(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -321,9 +321,25 @@ def summary(state: dict[str, Any]) -> dict[str, int]:
     }
 
 
+def detailed_report(state: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = summary(state)
+    result["failed_repositories"] = [
+        {
+            "name": record.get("name", ""),
+            "path": record.get("path", ""),
+            "attempts": int(record.get("attempts", 0)),
+            "terminal": not is_eligible(record),
+            "last_message": str(record.get("last_message", "")),
+        }
+        for record in state.get("repositories", [])
+        if record.get("status") == "failed"
+    ]
+    return result
+
+
 def command_report(arguments: argparse.Namespace) -> int:
     state = load_state(Path(arguments.state).expanduser().resolve())
-    print(json.dumps(summary(state), ensure_ascii=False, indent=2))
+    print(json.dumps(detailed_report(state), ensure_ascii=False, indent=2))
     return 0
 
 
