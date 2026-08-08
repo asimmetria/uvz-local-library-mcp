@@ -113,6 +113,71 @@ class KnowledgePipelineTest(unittest.TestCase):
             self.assertNotEqual(0, source_change.returncode)
             self.assertIn("src/main/kotlin/demo/Changed.kt", source_change.stdout)
 
+    def test_single_authoring_runner_uses_non_interactive_prompt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = root / "fixture"
+            repository.mkdir()
+            (repository / "README.md").write_text(
+                "# Fixture\n\nТестовый проект.\n", encoding="utf-8"
+            )
+            subprocess.run(["git", "init", str(repository)], check=True, capture_output=True)
+            subprocess.run(
+                ["git", "-C", str(repository), "add", "README.md"],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [
+                    "git", "-C", str(repository),
+                    "-c", "user.name=Fixture",
+                    "-c", "user.email=fixture@example.invalid",
+                    "commit", "-m", "Fixture",
+                ],
+                check=True,
+                capture_output=True,
+            )
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            invocation = root / "gigacode-args.json"
+            fake_gigacode = fake_bin / "gigacode"
+            fake_gigacode.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, os, sys\n"
+                "from pathlib import Path\n"
+                "Path(os.environ['FAKE_GIGACODE_ARGS']).write_text(json.dumps(sys.argv[1:]), encoding='utf-8')\n"
+                "Path('project-context.yaml').write_text(\n"
+                "    'schema_version: 1\\n'\n"
+                "    'kind: application\\n'\n"
+                "    'name: fixture\\n'\n"
+                "    'purpose: \"Описывает тестовое приложение.\"\\n'\n"
+                "    'use_when:\\n  - \"Нужно проверить non-interactive runner.\"\\n'\n"
+                "    'evidence:\\n  - path: README.md\\n    proves: \"Подтверждает назначение.\"\\n',\n"
+                "    encoding='utf-8',\n"
+                ")\n",
+                encoding="utf-8",
+            )
+            fake_gigacode.chmod(0o755)
+            environment = os.environ.copy()
+            environment.update({
+                "PATH": str(fake_bin) + os.pathsep + environment.get("PATH", ""),
+                "FAKE_GIGACODE_ARGS": str(invocation),
+                "PROJECT_CONTEXT_OUTPUT_FORMAT": "text",
+                "PYTHON_BIN": sys.executable,
+            })
+            runner = ROOT / "skills/project-context-authoring/scripts/run-project-context.sh"
+            result = subprocess.run(
+                ["bash", str(runner), str(repository)],
+                cwd=ROOT,
+                env=environment,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            arguments = json.loads(invocation.read_text(encoding="utf-8"))
+            self.assertEqual("-p", arguments[-2])
+            self.assertIn("$project-context-authoring", arguments[-1])
+
     def test_structured_catalog_and_comment_free_usage_extraction(self):
         catalog = parse_version_catalog(
             '[versions]\nfixture = "1.2.3"\nstrict = { strictly = "4.0" }\n\n'
@@ -333,6 +398,7 @@ class KnowledgePipelineTest(unittest.TestCase):
             self.assertIn("run_shell_command", arguments)
             self.assertIn("mcp__local-library-mcp__project_context_campaign_finish", arguments)
             self.assertIn("mcp__local-library-mcp__validate_project_context", arguments)
+            self.assertEqual("-p", arguments[-2])
             self.assertIn("$project-context-authoring", arguments[-1])
             campaign = json.loads(state.read_text(encoding="utf-8"))
             records = {item["name"]: item for item in campaign["repositories"]}

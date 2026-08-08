@@ -46,7 +46,7 @@ fi
 
 cd "$PROJECT"
 echo "Starting isolated GigaCode session in $PROJECT" >&2
-gigacode "${GIGACODE_ARGS[@]}" "$PROMPT"
+gigacode "${GIGACODE_ARGS[@]}" -p "$PROMPT"
 if ! "$CHECK_WORKTREE" "$PROJECT"; then
   echo "FAILED SAFETY CHECK: agent changed files outside the authoring scope; inspect them manually" >&2
   exit 4

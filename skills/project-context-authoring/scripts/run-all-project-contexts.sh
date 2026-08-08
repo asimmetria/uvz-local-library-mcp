@@ -111,7 +111,7 @@ echo "- $AUTHORING_EXCLUDES (authoring only)" >&2
 set +e
 (
   cd "$WORKSPACE"
-  gigacode "${GIGACODE_ARGS[@]}" "$PROMPT"
+  gigacode "${GIGACODE_ARGS[@]}" -p "$PROMPT"
 )
 GIGACODE_CODE=$?
 set -e
