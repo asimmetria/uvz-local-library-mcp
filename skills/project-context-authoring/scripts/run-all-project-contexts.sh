@@ -23,6 +23,7 @@ MCP_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd -P)"
 PROMPT_FILE="$SCRIPT_DIR/../references/workspace-campaign-prompt.md"
 STATE_TOOL="$SCRIPT_DIR/project-context-campaign-state.py"
 VALIDATE_TOOL="$SCRIPT_DIR/validate-project-context.sh"
+GIGACODE_RUNNER="$SCRIPT_DIR/run-gigacode-noninteractive.sh"
 INDEX_EXCLUDES="${INDEX_EXCLUDE_FILE:-$MCP_ROOT/index-exclude.txt}"
 AUTHORING_EXCLUDES="${PROJECT_CONTEXT_EXCLUDE_FILE:-$MCP_ROOT/project-context-exclude.txt}"
 STATE_FILE="${PROJECT_CONTEXT_STATE_FILE:-$MCP_ROOT/.project-context-authoring-campaign.json}"
@@ -31,7 +32,7 @@ if ! command -v gigacode >/dev/null 2>&1; then
   echo "gigacode was not found in PATH" >&2
   exit 1
 fi
-for required in "$PROMPT_FILE" "$STATE_TOOL" "$VALIDATE_TOOL"; do
+for required in "$PROMPT_FILE" "$STATE_TOOL" "$VALIDATE_TOOL" "$GIGACODE_RUNNER"; do
   if [ ! -f "$required" ]; then
     echo "Required campaign file is missing: $required" >&2
     exit 1
@@ -111,7 +112,7 @@ echo "- $AUTHORING_EXCLUDES (authoring only)" >&2
 set +e
 (
   cd "$WORKSPACE"
-  gigacode "${GIGACODE_ARGS[@]}" -p "$PROMPT"
+  "$GIGACODE_RUNNER" gigacode "${GIGACODE_ARGS[@]}" -p "$PROMPT"
 )
 GIGACODE_CODE=$?
 set -e

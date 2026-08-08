@@ -7,6 +7,7 @@ PROJECT="$(cd "$PROJECT" && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 PROMPT_FILE="$SCRIPT_DIR/../references/repository-prompt.md"
 CHECK_WORKTREE="$SCRIPT_DIR/check-authoring-worktree.sh"
+GIGACODE_RUNNER="$SCRIPT_DIR/run-gigacode-noninteractive.sh"
 
 if ! command -v gigacode >/dev/null 2>&1; then
   echo "gigacode was not found in PATH" >&2
@@ -46,7 +47,7 @@ fi
 
 cd "$PROJECT"
 echo "Starting isolated GigaCode session in $PROJECT" >&2
-gigacode "${GIGACODE_ARGS[@]}" -p "$PROMPT"
+"$GIGACODE_RUNNER" gigacode "${GIGACODE_ARGS[@]}" -p "$PROMPT"
 if ! "$CHECK_WORKTREE" "$PROJECT"; then
   echo "FAILED SAFETY CHECK: agent changed files outside the authoring scope; inspect them manually" >&2
   exit 4
