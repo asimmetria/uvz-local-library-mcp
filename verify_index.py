@@ -9,7 +9,7 @@ import sqlite3
 from pathlib import Path
 
 from knowledge_schema import KnowledgeSchemaError, SCHEMA_VERSION, validate_schema
-from retrieval_evaluator import evaluate, load_definition
+from retrieval_evaluator import evaluate, evaluate_dependency_graph, load_definition
 
 
 RAW_HTML = re.compile(r"</?(?:article|aside|div|footer|header|main|nav|script|style)\b", re.IGNORECASE)
@@ -54,6 +54,22 @@ def main():
         report["integrity_check"] = con.execute("PRAGMA quick_check").fetchone()[0]
         chunks = con.execute("SELECT count(*) FROM chunks").fetchone()[0]
         generated = con.execute("SELECT count(*) FROM chunks WHERE path GLOB '*/generated/*' OR path GLOB '*/__generated/*'").fetchone()[0]
+        generated_dependency_paths = con.execute(
+            "SELECT count(*) FROM dependency_usages "
+            "WHERE path GLOB '*/generated/*' OR path GLOB '*/__generated/*'"
+        ).fetchone()[0]
+        orphan_dependency_usages = con.execute(
+            "SELECT count(*) FROM dependency_usages AS usage "
+            "LEFT JOIN dependency_aliases AS alias ON "
+            "alias.catalog_repository = usage.catalog_repository AND "
+            "alias.catalog_path = usage.catalog_path AND alias.alias = usage.alias "
+            "WHERE alias.alias IS NULL"
+        ).fetchone()[0]
+        invalid_dependency_provenance = con.execute(
+            "SELECT count(*) FROM dependency_usages WHERE "
+            "consumer_repository = '' OR consumer_module = '' OR path = '' "
+            "OR commit_sha = '' OR line < 1"
+        ).fetchone()[0]
         invalid_lines = con.execute("SELECT count(*) FROM chunks WHERE line_start < 1 OR line_end < line_start").fetchone()[0]
         docs = con.execute("SELECT source_id, content FROM chunks WHERE kind IN ('docs', 'usage')").fetchall()
         raw_html = [source_id for source_id, content in docs if RAW_HTML.search(content)]
@@ -71,6 +87,9 @@ def main():
         report.update({
             "chunks": chunks,
             "generated_paths_indexed": generated,
+            "generated_dependency_paths": generated_dependency_paths,
+            "orphan_dependency_usages": orphan_dependency_usages,
+            "invalid_dependency_provenance": invalid_dependency_provenance,
             "invalid_line_ranges": invalid_lines,
             "raw_html_in_docs": len(raw_html),
             "raw_html_sources": raw_html[:20],
@@ -107,11 +126,14 @@ def main():
         retrieval_passed = True
         if options.cases:
             try:
-                retrieval = evaluate(con, load_definition(options.cases))
+                definition = load_definition(options.cases)
+                retrieval = evaluate(con, definition)
+                dependency_graph = evaluate_dependency_graph(con, definition)
                 report["retrieval_cases"] = str(options.cases)
                 report["retrieval_cases_sha256"] = hashlib.sha256(options.cases.read_bytes()).hexdigest()
                 report["retrieval_evaluation"] = retrieval
-                retrieval_passed = retrieval["passed"]
+                report["dependency_graph_evaluation"] = dependency_graph
+                retrieval_passed = retrieval["passed"] and dependency_graph["passed"]
             except (OSError, ValueError, json.JSONDecodeError, sqlite3.DatabaseError) as exception:
                 report["errors"].append("Retrieval evaluation failed: %s" % exception)
                 retrieval_passed = False
@@ -119,6 +141,9 @@ def main():
             report["integrity_check"] == "ok"
             and bool(chunks)
             and not generated
+            and not generated_dependency_paths
+            and not orphan_dependency_usages
+            and not invalid_dependency_provenance
             and not invalid_lines
             and not raw_html
             and not possible_secret_leaks

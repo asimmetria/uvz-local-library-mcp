@@ -70,3 +70,8 @@ line ranges, raw HTML, потенциальные секреты и заданн
 MRR и долю корректных пустых результатов; packager принимает только успешный
 отчёт и включает точный файл вопросов в архив. Полный сценарный benchmark с
 оценкой сгенерированного агентом решения относится к следующему этапу.
+
+Тот же definition может содержать `dependency_cases`. Они отдельно проверяют
+структурный поиск aliases и реальных consumers, включая repository, Gradle
+module, build path, configuration, line и commit. Orphan usage-рёбра, generated
+paths и неполный provenance блокируют verified build.

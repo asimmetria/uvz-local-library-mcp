@@ -15,8 +15,9 @@ sys.path.insert(0, str(ROOT))
 
 from dependency_graph import find_alias_usages, parse_version_catalog  # noqa: E402
 from knowledge_indexer import chunks, redact  # noqa: E402
-from knowledge_schema import KnowledgeSchemaError, SCHEMA_VERSION, validate_database  # noqa: E402
+from knowledge_schema import KnowledgeSchemaError, SCHEMA_VERSION, create_schema, validate_database  # noqa: E402
 from project_context import validate_card  # noqa: E402
+from retrieval_evaluator import evaluate_dependency_graph  # noqa: E402
 import server as server_module  # noqa: E402
 from server import query  # noqa: E402
 
@@ -105,6 +106,58 @@ class KnowledgePipelineTest(unittest.TestCase):
             connection.close()
             with self.assertRaises(KnowledgeSchemaError):
                 validate_database(database)
+
+    def test_dependency_graph_gate_requires_real_matching_consumers(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        create_schema(connection)
+        connection.execute(
+            "INSERT INTO dependency_aliases VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "fixture", "uvz-platform", "gradle/libs.versions.toml", "a" * 40,
+                "fixtureLibrary", "fixtureLibrary", "com.example", "fixture-library",
+                "fixture", "1.0", "fixture-project", ":",
+            ),
+        )
+        connection.execute(
+            "INSERT INTO dependency_usages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "fixture", "uvz-platform", "gradle/libs.versions.toml",
+                "fixtureLibrary", "fixtureLibrary", "fixture-consumer", ":api",
+                "api/build.gradle.kts", "implementation", "b" * 40, 12,
+            ),
+        )
+        good_case = {
+            "id": "fixture-consumer",
+            "query": "fixture library",
+            "expected_aliases": ["fixtureLibrary"],
+            "expected_consumers": [{
+                "repository": "fixture-consumer",
+                "module": ":api",
+                "path": "api/build.gradle.kts",
+                "configuration": "implementation",
+            }],
+        }
+        below_minimum = evaluate_dependency_graph(connection, {
+            "thresholds": {"min_dependency_cases": 2},
+            "dependency_cases": [good_case],
+        })
+        self.assertFalse(below_minimum["passed"])
+        wrong_consumer = evaluate_dependency_graph(connection, {
+            "thresholds": {"min_dependency_cases": 1},
+            "dependency_cases": [{
+                **good_case,
+                "expected_consumers": [{"repository": "another-consumer"}],
+            }],
+        })
+        self.assertFalse(wrong_consumer["passed"])
+        verified = evaluate_dependency_graph(connection, {
+            "thresholds": {"min_dependency_cases": 1},
+            "dependency_cases": [good_case],
+        })
+        self.assertTrue(verified["passed"])
+        self.assertTrue(verified["results"][0]["provenance_valid"])
+        connection.close()
 
     def test_project_context_rejects_non_portable_or_missing_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -251,6 +304,8 @@ class KnowledgePipelineTest(unittest.TestCase):
                     "min_recall_at_k": 1.0,
                     "min_mrr": 1.0,
                     "min_negative_pass_rate": 1.0,
+                    "min_dependency_cases": 3,
+                    "min_dependency_pass_rate": 1.0,
                 },
                 "cases": [
                     {
@@ -276,6 +331,47 @@ class KnowledgePipelineTest(unittest.TestCase):
                     {
                         "id": "fixture-missing",
                         "query": "DefinitelyMissingFixtureSymbol",
+                        "expect_no_results": True,
+                    },
+                ],
+                "dependency_cases": [
+                    {
+                        "id": "fixture-library-consumer",
+                        "query": "fixture library",
+                        "expected_aliases": ["fixtureLibrary"],
+                        "expected_consumers": [{
+                            "alias": "fixtureLibrary",
+                            "repository": "fixture-project",
+                            "module": ":",
+                            "path": "build.gradle.kts",
+                            "configuration": "implementation",
+                        }],
+                    },
+                    {
+                        "id": "helper-adapter-consumer",
+                        "query": "helper adapter",
+                        "expected_aliases": ["helperAdapter"],
+                        "expected_consumers": [{
+                            "repository": "fixture-project",
+                            "module": ":",
+                            "path": "build.gradle.kts",
+                            "configuration": "api",
+                        }],
+                    },
+                    {
+                        "id": "fixture-test-kit-consumer",
+                        "query": "libs.fixtureTestKit",
+                        "expected_aliases": ["fixtureTestKit"],
+                        "expected_consumers": [{
+                            "repository": "fixture-project",
+                            "module": ":",
+                            "path": "build.gradle.kts",
+                            "configuration": "testImplementation",
+                        }],
+                    },
+                    {
+                        "id": "missing-dependency",
+                        "query": "DefinitelyMissingDependencyAlias",
                         "expect_no_results": True,
                     },
                 ],
@@ -371,6 +467,9 @@ class KnowledgePipelineTest(unittest.TestCase):
             self.assertEqual("evaluation-cases.built.json", report["retrieval_cases"])
             self.assertEqual(1.0, report["retrieval_evaluation"]["recall_at_k"])
             self.assertEqual(1.0, report["retrieval_evaluation"]["mrr"])
+            self.assertEqual(4, report["dependency_graph_evaluation"]["cases"])
+            self.assertEqual(1.0, report["dependency_graph_evaluation"]["pass_rate"])
+            self.assertTrue(report["dependency_graph_evaluation"]["passed"])
             self.assertEqual(hashlib.sha256(database.read_bytes()).hexdigest(), report["database_sha256"])
             output = workspace / "dist"
             self.run_script(

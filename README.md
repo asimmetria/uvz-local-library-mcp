@@ -391,6 +391,7 @@ python3 smoke_test.py
 
 - [План развития](ROADMAP.md)
 - [Dependency usage graph](docs/dependency-usage-graph.md)
+- [Retrieval и dependency graph evaluation](docs/retrieval-evaluation.md)
 - [Модель project context](docs/curated-project-context.md)
 - [Quality gate](docs/ingestion-audit.md)
 - [Knowledge packs](docs/knowledge-packs.md)

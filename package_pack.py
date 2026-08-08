@@ -52,6 +52,8 @@ def main():
         raise SystemExit("Cannot package an index that failed evaluation")
     if not evaluation.get("retrieval_evaluation", {}).get("passed"):
         raise SystemExit("Cannot package an index without a successful retrieval evaluation")
+    if not evaluation.get("dependency_graph_evaluation", {}).get("passed"):
+        raise SystemExit("Cannot package an index without a successful dependency graph evaluation")
     if evaluation.get("retrieval_cases_sha256") != digest(cases):
         raise SystemExit("Retrieval evaluation is stale: its cases checksum does not match")
     if evaluation.get("database_sha256") != database_sha256:

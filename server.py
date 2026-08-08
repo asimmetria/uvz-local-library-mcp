@@ -7,7 +7,12 @@ import sys
 from pathlib import Path
 
 from knowledge_schema import KnowledgeSchemaError, validate_schema
-from retrieval_evaluator import KIND_PRIORITY_EXPRESSION, RANK_EXPRESSION, fts_query
+from retrieval_evaluator import (
+    KIND_PRIORITY_EXPRESSION,
+    RANK_EXPRESSION,
+    fts_query,
+    matching_dependency_aliases,
+)
 
 
 BASE = Path(__file__).parent
@@ -112,32 +117,6 @@ def repositories():
             row["repository"], row["chunks"], row["context_chunks"], row["usage_chunks"], row["source_chunks"], row["example_chunks"], row["docs_chunks"], row["config_chunks"], row["modules"], row["commit_sha"][:12]
         ))
     return "\n".join(lines)
-
-
-def normalized_dependency_text(value):
-    return re.sub(r"[^\w]+", "", value.lower(), flags=re.UNICODE).replace("_", "")
-
-
-def matching_dependency_aliases(con, requested):
-    terms = [
-        normalized_dependency_text(term)
-        for term in re.findall(r"[\w-]+", requested, flags=re.UNICODE)
-        if term.lower() not in {"libs", "library", "dependency"}
-    ]
-    if not terms:
-        return []
-    rows = con.execute(
-        "SELECT * FROM dependency_aliases ORDER BY alias, catalog_path"
-    ).fetchall()
-    return [
-        row for row in rows
-        if all(term in normalized_dependency_text(" ".join(
-            str(row[field]) for field in (
-                "alias", "accessor", "group_id", "artifact_id",
-                "owner_repository", "owner_module",
-            )
-        )) for term in terms)
-    ]
 
 
 def alias_usage_rows(con, alias_row, repository="", limit=10):
