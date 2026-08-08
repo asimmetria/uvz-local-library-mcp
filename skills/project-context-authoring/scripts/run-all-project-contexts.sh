@@ -23,7 +23,8 @@ MCP_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd -P)"
 PROMPT_FILE="$SCRIPT_DIR/../references/workspace-campaign-prompt.md"
 STATE_TOOL="$SCRIPT_DIR/project-context-campaign-state.py"
 VALIDATE_TOOL="$SCRIPT_DIR/validate-project-context.sh"
-EXCLUDE_FILE="${INDEX_EXCLUDE_FILE:-$MCP_ROOT/index-exclude.txt}"
+INDEX_EXCLUDES="${INDEX_EXCLUDE_FILE:-$MCP_ROOT/index-exclude.txt}"
+AUTHORING_EXCLUDES="${PROJECT_CONTEXT_EXCLUDE_FILE:-$MCP_ROOT/project-context-exclude.txt}"
 STATE_FILE="${PROJECT_CONTEXT_STATE_FILE:-$MCP_ROOT/.project-context-authoring-campaign.json}"
 
 if ! command -v gigacode >/dev/null 2>&1; then
@@ -47,7 +48,10 @@ PYTHON="${PYTHON:-python3}"
   exit 1
 }
 
-INIT_ARGS=(init --workspace "$WORKSPACE" --state "$STATE_FILE" --exclude-file "$EXCLUDE_FILE")
+INIT_ARGS=(init --workspace "$WORKSPACE" --state "$STATE_FILE" --exclude-file "$INDEX_EXCLUDES")
+if [ "$AUTHORING_EXCLUDES" != "$INDEX_EXCLUDES" ]; then
+  INIT_ARGS+=(--exclude-file "$AUTHORING_EXCLUDES")
+fi
 if [ "$RESTART" = "1" ]; then
   INIT_ARGS+=(--restart)
 fi
@@ -63,7 +67,8 @@ PROMPT="$(<"$PROMPT_FILE")"
 PROMPT+=$'\n\n## Параметры текущей кампании\n\n'
 PROMPT+="- Workspace: $WORKSPACE"$'\n'
 PROMPT+="- State file: $STATE_FILE"$'\n'
-PROMPT+="- Excludes: $EXCLUDE_FILE"$'\n'
+PROMPT+="- Index excludes: $INDEX_EXCLUDES"$'\n'
+PROMPT+="- Authoring-only excludes: $AUTHORING_EXCLUDES"$'\n'
 PROMPT+="- Максимум попыток на repository: 2"$'\n'
 
 OUTPUT_FORMAT="${PROJECT_CONTEXT_OUTPUT_FORMAT:-stream-json}"
@@ -100,7 +105,9 @@ fi
 
 echo "Starting one primary GigaCode agent for workspace: $WORKSPACE" >&2
 echo "Campaign state: $STATE_FILE" >&2
-echo "Dirty repositories are included; only exact names from $EXCLUDE_FILE are excluded." >&2
+echo "Dirty repositories are included; exact excludes are read from:" >&2
+echo "- $INDEX_EXCLUDES" >&2
+echo "- $AUTHORING_EXCLUDES (authoring only)" >&2
 set +e
 (
   cd "$WORKSPACE"

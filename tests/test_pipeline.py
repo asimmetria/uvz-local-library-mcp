@@ -234,7 +234,8 @@ class KnowledgePipelineTest(unittest.TestCase):
             clean = workspace / "clean-project"
             dirty = workspace / "dirty-project"
             excluded = workspace / "excluded-project"
-            for project in (clean, dirty, excluded):
+            authoring_excluded = workspace / "authoring-excluded-project"
+            for project in (clean, dirty, excluded, authoring_excluded):
                 project.mkdir(parents=True)
                 (project / "README.md").write_text(
                     "# Fixture\n\nТестовый проект.\n", encoding="utf-8"
@@ -255,6 +256,10 @@ class KnowledgePipelineTest(unittest.TestCase):
             (dirty / "README.md").write_text(dirty_text, encoding="utf-8")
             exclude_file = root / "index-exclude.txt"
             exclude_file.write_text("excluded-project\n", encoding="utf-8")
+            authoring_exclude_file = root / "project-context-exclude.txt"
+            authoring_exclude_file.write_text(
+                "authoring-excluded-project\n", encoding="utf-8"
+            )
 
             fake_bin = root / "bin"
             fake_bin.mkdir()
@@ -305,6 +310,7 @@ class KnowledgePipelineTest(unittest.TestCase):
                 "PROJECT_CONTEXT_STATE_FILE": str(state),
                 "PROJECT_CONTEXT_OUTPUT_FORMAT": "text",
                 "INDEX_EXCLUDE_FILE": str(exclude_file),
+                "PROJECT_CONTEXT_EXCLUDE_FILE": str(authoring_exclude_file),
                 "PYTHON_BIN": sys.executable,
                 "PYTHONPATH": str(fake_site),
             })
@@ -335,6 +341,7 @@ class KnowledgePipelineTest(unittest.TestCase):
             self.assertTrue(all(item["attempts"] == 1 for item in records.values()))
             self.assertEqual(dirty_text, (dirty / "README.md").read_text(encoding="utf-8"))
             self.assertFalse((excluded / "project-context.yaml").exists())
+            self.assertFalse((authoring_excluded / "project-context.yaml").exists())
 
     def test_authoring_campaign_enforces_two_attempts_and_safety_scope(self):
         with tempfile.TemporaryDirectory() as directory:

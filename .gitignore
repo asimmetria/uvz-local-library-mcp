@@ -10,6 +10,7 @@ evaluation-cases.built.json
 .idea/
 dist/
 index-exclude.txt
+project-context-exclude.txt
 .project-context-authoring-state.tsv
 .project-context-authoring-state.tsv.*.bak
 .project-context-authoring-logs/

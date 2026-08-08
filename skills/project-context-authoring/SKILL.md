@@ -20,7 +20,8 @@ description: "Создаёт и проверяет project-context.yaml и docs/
   её последовательно и проверь все созданные карточки.
 - Для workspace используй bundled `scripts/run-all-project-contexts.sh`. Он
   включает все найденные Git repositories независимо от dirty-статуса и
-  исключает только точные имена из `index-exclude.txt`.
+  исключает точные имена из `index-exclude.txt` и authoring-only
+  `project-context-exclude.txt`.
 - В workspace-режиме перед каждой попыткой вызывай campaign `start`, а сразу
   после repository — `finish`, чтобы state-файл обновлялся немедленно. Не
   превышай две попытки: controller технически запрещает третью. `successful`
@@ -115,6 +116,7 @@ build descriptor, registry metadata в репозитории или сущес�
 читает очередь из `.project-context-authoring-campaign.json`, не создаёт
 субагентов и сразу сохраняет результат каждого repository. При прерывании
 повторный запуск продолжает `pending` и `failed` с числом попыток меньше двух.
-Точные исключения задаются по одному имени директории на строку в
-`index-exclude.txt`. Запуск с `--restart` создаёт backup state и начинает новую
+Общие с индексацией исключения задаются в `index-exclude.txt`, а исключения
+только из authoring-кампании — в `project-context-exclude.txt`, по одному имени
+директории на строку. Запуск с `--restart` создаёт backup state и начинает новую
 кампанию.

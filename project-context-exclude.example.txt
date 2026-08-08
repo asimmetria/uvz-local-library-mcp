@@ -1,0 +1,4 @@
+# Exact Git root directory names to omit only from project-context authoring.
+# These repositories remain eligible for normal indexing.
+
+uvz-ai

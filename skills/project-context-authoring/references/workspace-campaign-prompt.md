@@ -52,7 +52,8 @@ State-файл — обязательный журнал кампании. Об�
 ## Ограничения
 
 - Обрабатывай только repositories, уже находящиеся в state: точные исключения
-  из `index-exclude.txt` controller туда не добавляет.
+  из `index-exclude.txt` и `project-context-exclude.txt` controller туда не
+  добавляет.
 - Не пропускай repository и не ставь `failed` только потому, что он большой,
   содержит много модулей, nested build roots, composite build или
   `includeBuild`. Сначала собери полную очередь модулей, затем последовательно

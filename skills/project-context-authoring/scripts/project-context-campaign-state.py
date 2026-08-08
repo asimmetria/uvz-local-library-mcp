@@ -52,14 +52,15 @@ def save_state(path: Path, state: dict[str, Any]) -> None:
     os.replace(temporary, path)
 
 
-def read_excludes(path: Path | None) -> set[str]:
-    if path is None or not path.is_file():
-        return set()
+def read_excludes(paths: list[Path]) -> set[str]:
     result: set[str] = set()
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        name = raw_line.split("#", 1)[0].strip()
-        if name:
-            result.add(name)
+    for path in paths:
+        if not path.is_file():
+            continue
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            name = raw_line.split("#", 1)[0].strip()
+            if name:
+                result.add(name)
     return result
 
 
@@ -140,8 +141,11 @@ def command_init(arguments: argparse.Namespace) -> int:
     if not workspace.is_dir():
         raise SystemExit(f"Workspace does not exist: {workspace}")
     state_path = Path(arguments.state).expanduser().resolve()
-    exclude_path = Path(arguments.exclude_file).expanduser().resolve() if arguments.exclude_file else None
-    excluded = read_excludes(exclude_path)
+    exclude_paths = [
+        Path(value).expanduser().resolve()
+        for value in arguments.exclude_file
+    ]
+    excluded = read_excludes(exclude_paths)
     repositories = discover_repositories(workspace, excluded)
 
     previous_by_path: dict[str, dict[str, Any]] = {}
@@ -185,7 +189,8 @@ def command_init(arguments: argparse.Namespace) -> int:
     state = {
         "schema_version": SCHEMA_VERSION,
         "workspace": str(workspace),
-        "exclude_file": str(exclude_path) if exclude_path else None,
+        "exclude_file": str(exclude_paths[0]) if exclude_paths else None,
+        "exclude_files": [str(path) for path in exclude_paths],
         "max_attempts_per_repository": MAX_ATTEMPTS,
         "updated_at": utc_now(),
         "repositories": records,
@@ -437,7 +442,7 @@ def parser() -> argparse.ArgumentParser:
     init = subparsers.add_parser("init")
     init.add_argument("--workspace", required=True)
     init.add_argument("--state", required=True)
-    init.add_argument("--exclude-file")
+    init.add_argument("--exclude-file", action="append", default=[])
     init.add_argument("--restart", action="store_true")
     init.set_defaults(handler=command_init)
 

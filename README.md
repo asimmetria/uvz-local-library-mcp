@@ -179,6 +179,18 @@ State локален и игнорируется Git:
 возобновляются, пока не исчерпаны две попытки. Для сознательного полного
 перезапуска используй `--restart`: старый state копируется в timestamped backup.
 
+Чтобы repository индексировался, но authoring-skill не создавал в нём
+`project-context.yaml` и `docs/usage/*.md`, используй отдельный список:
+
+```bash
+cp project-context-exclude.example.txt project-context-exclude.txt
+```
+
+По умолчанию шаблон содержит `uvz-ai`: его документы остаются в индексе, но
+authoring-кампания его не обрабатывает. `index-exclude.txt` остаётся общим
+исключением: перечисленные там repositories не участвуют ни в индексации, ни в
+authoring.
+
 ```bash
 cd "/home/work/21498149@sigma.sbrf.ru/projects/uvz-local-library-mcp"
 ./skills/project-context-authoring/scripts/run-all-project-contexts.sh \
