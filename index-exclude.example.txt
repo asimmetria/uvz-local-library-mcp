@@ -4,3 +4,7 @@
 #
 # example-internal-project
 # uvz-local-library-mcp
+
+# Agent documentation/extension repository; exclude it when its content is not
+# part of the library knowledge pack maintained by this installation.
+uvz-ai
