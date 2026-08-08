@@ -175,6 +175,9 @@ class KnowledgePipelineTest(unittest.TestCase):
             )
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
             arguments = json.loads(invocation.read_text(encoding="utf-8"))
+            self.assertIn("--exclude-tools", arguments)
+            self.assertIn("agent", arguments)
+            self.assertIn("run_shell_command", arguments)
             self.assertEqual("-p", arguments[-2])
             self.assertIn("$project-context-authoring", arguments[-1])
 

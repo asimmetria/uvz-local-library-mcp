@@ -33,6 +33,8 @@ PROMPT="$(<"$PROMPT_FILE")"
 OUTPUT_FORMAT="${PROJECT_CONTEXT_OUTPUT_FORMAT:-stream-json}"
 GIGACODE_ARGS=(
   --approval-mode=auto-edit
+  --exclude-tools agent
+  --exclude-tools run_shell_command
   --allowed-mcp-server-names local-library-mcp
   --allowed-tools mcp__local-library-mcp__suggest_dependency
   --allowed-tools mcp__local-library-mcp__find_library_usages
