@@ -135,7 +135,8 @@ file-editing policy через heredoc или перенаправление в�
 
 Перед запуском проверь через `/mcp`, что `local-library-mcp` подключён и
 показывает campaign tools `project_context_campaign_next`, `start`, `finish` и
-`report`. Затем запусти runner из MCP repository:
+`report`, а также `validate_project_context`. Затем запусти runner из MCP
+repository:
 
 ```bash
 cd "/home/work/21498149@sigma.sbrf.ru/projects/uvz-local-library-mcp"
@@ -150,8 +151,9 @@ Runner:
 - находит все Git repositories и передаёт их одному основному GigaCode-агенту;
 - основной агент обрабатывает repositories строго последовательно и не запускает
   субагентов;
-- включает `auto-edit` и заранее разрешает только read-only MCP tools
-  `suggest_dependency`, `find_library_usages` и четыре campaign-state tools;
+- включает `auto-edit`, заранее разрешает read-only MCP tools
+  `suggest_dependency`, `find_library_usages`, `validate_project_context` и
+  отдельно четыре ограниченных campaign-state tools;
 - полностью отключает agent/subagent и shell tools;
 - не проверяет dirty как условие допуска: незакоммиченные repositories тоже
   обрабатываются, а существующие изменения запрещено сбрасывать или затирать;
@@ -160,6 +162,8 @@ Runner:
   `failed`, а третья попытка запрещена;
 - сразу после каждого repository атомарно записывает `successful` или `failed`;
 - делает не больше двух попыток на один repository;
+- требует `VALIDATION_OK` внутри попытки, чтобы агент сразу видел и исправлял
+  точные ошибки schema и paths;
 - после agent session повторно запускает deterministic validator для всех
   успешных карточек.
 
@@ -180,6 +184,23 @@ cd "/home/work/21498149@sigma.sbrf.ru/projects/uvz-local-library-mcp"
 ./skills/project-context-authoring/scripts/run-all-project-contexts.sh \
   "/home/work/21498149@sigma.sbrf.ru/projects" --restart
 ```
+
+### Восстановление state после старого validator workflow
+
+Версии до MCP `1.4.0` сохраняли только общую ошибку `Deterministic validation
+failed after the agent session`, поэтому повторная попытка не знала, что именно
+исправлять. После обновления один раз верни только такие записи в очередь:
+
+```bash
+cd "/home/work/21498149@sigma.sbrf.ru/projects/uvz-local-library-mcp"
+./skills/project-context-authoring/scripts/run-all-project-contexts.sh \
+  "/home/work/21498149@sigma.sbrf.ru/projects" \
+  --reset-validation-failures
+```
+
+Успешные и ещё не обработанные repositories не сбрасываются. Для возвращённых
+записей начинается новый лимит из двух попыток уже с validator feedback внутри
+agent session. В следующих запусках этот флаг не нужен.
 
 Если raw live JSON слишком шумный, переключи вывод на обычный текст:
 

@@ -35,6 +35,7 @@ GIGACODE_ARGS=(
   --allowed-mcp-server-names local-library-mcp
   --allowed-tools mcp__local-library-mcp__suggest_dependency
   --allowed-tools mcp__local-library-mcp__find_library_usages
+  --allowed-tools mcp__local-library-mcp__validate_project_context
 )
 if [ "$OUTPUT_FORMAT" = "stream-json" ]; then
   GIGACODE_ARGS+=(--output-format stream-json --include-partial-messages)

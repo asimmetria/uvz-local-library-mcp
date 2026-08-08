@@ -17,6 +17,7 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 MAX_ATTEMPTS = 2
+VALIDATION_FAILURE_PREFIX = "Deterministic validation failed after the agent session."
 
 
 def utc_now() -> str:
@@ -322,6 +323,31 @@ def command_invalidate(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def command_reset_validation_failures(arguments: argparse.Namespace) -> int:
+    """Repair state produced before validator feedback was available in-agent."""
+    state_path = Path(arguments.state).expanduser().resolve()
+    state = load_state(state_path)
+    reset = []
+    for record in state.get("repositories", []):
+        message = str(record.get("last_message", ""))
+        if record.get("status") != "failed" or not message.startswith(VALIDATION_FAILURE_PREFIX):
+            continue
+        record.update({
+            "status": "pending",
+            "attempts": 0,
+            "started_at": None,
+            "completed_at": None,
+            "last_message": "Retry after validator-feedback upgrade. Previous: " + message,
+            "changed_outside_scope": [],
+            "repair_resets": int(record.get("repair_resets", 0)) + 1,
+        })
+        record.pop("safety_baseline", None)
+        reset.append(record["path"])
+    save_state(state_path, state)
+    print(json.dumps({"reset": len(reset), "repositories": reset}, ensure_ascii=False))
+    return 0
+
+
 def command_check(arguments: argparse.Namespace) -> int:
     state = load_state(Path(arguments.state).expanduser().resolve())
     result = summary(state)
@@ -375,6 +401,10 @@ def parser() -> argparse.ArgumentParser:
     invalidate.add_argument("--repository", required=True)
     invalidate.add_argument("--message", required=True)
     invalidate.set_defaults(handler=command_invalidate)
+
+    reset_validation = subparsers.add_parser("reset-validation-failures")
+    reset_validation.add_argument("--state", required=True)
+    reset_validation.set_defaults(handler=command_reset_validation_failures)
     return result
 
 

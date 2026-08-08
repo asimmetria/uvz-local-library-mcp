@@ -34,6 +34,9 @@ description: "Создаёт и проверяет project-context.yaml и docs/
 - Используй только schema version 1 из
   [project-context-schema.md](references/project-context-schema.md). Не
   придумывай поля и не сохраняй старый формат без `schema_version`.
+- Всегда заключай пояснительные YAML-строки в двойные кавычки, особенно каждый
+  элемент `use_when`, `do_not_use_when` и `unknowns`. Строка с `: ` без кавычек
+  разбирается YAML как mapping и не соответствует schema.
 - Все `evidence.path`, `examples.path` и `components.context` указывай
   относительно корня Git-репозитория. Проверь существование каждого пути.
   Запрещены `/home/...`, `/Users/...`, `C:\\...` и URL без relative path.
@@ -67,11 +70,12 @@ description: "Создаёт и проверяет project-context.yaml и docs/
    корректный вызов доказать нельзя, не создавай фиктивный пример и запиши
    пробел в `unknowns`.
 7. Повторно открой созданные файлы и выполни финальную проверку ниже.
-8. Не запускай shell-валидатор из agent session: внешний runner выполнит его
-   после завершения. Сам проверь schema и пути штатными read/search tools. В
-   workspace-режиме зафиксируй результат текущего repository через campaign
-   `finish` до перехода к следующему. Не объявляй работу завершённой, если
-   запись заблокирована или проверка файлов выявила ошибку.
+8. В workspace-режиме вызови read-only MCP `validate_project_context` для
+   текущего repository. Исправь каждую ошибку и повторяй проверку, пока tool не
+   вернёт `VALIDATION_OK`. Только после этого вызови campaign `finish` со
+   статусом `successful`. При невозможности исправить вызови `finish` со
+   статусом `failed` и точной ошибкой. Не запускай shell-валидатор: внешний
+   runner независимо повторит проверку после agent session.
 
 ## Dependency
 
@@ -90,6 +94,8 @@ build descriptor, registry metadata в репозитории или сущес�
 
 - каждая карточка имеет `schema_version`, допустимый `kind`, `name`, русские
   `purpose`/`use_when` и хотя бы один структурированный `evidence`;
+- `use_when`, `do_not_use_when` и `unknowns` являются списками непустых строк,
+  а не YAML mappings;
 - каждый independently consumable child suite имеет собственную карточку;
 - application не названа library только из-за facade-модуля внутри;
 - entrypoints существуют в `src/main`, configuration keys существуют в source;

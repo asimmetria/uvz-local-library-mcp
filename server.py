@@ -21,6 +21,7 @@ DB_PATH = BASE / "knowledge.db"
 CATALOG_PATH = BASE / "skills" / "library-knowledge-workflow" / "generated-catalog.md"
 AUDIT_PATH = BASE / "audit-summary.json"
 CAMPAIGN_TOOL = BASE / "skills" / "project-context-authoring" / "scripts" / "project-context-campaign-state.py"
+PROJECT_CONTEXT_VALIDATOR = BASE / "validate_project_contexts.py"
 
 
 def db():
@@ -300,6 +301,26 @@ def campaign_state(arguments, action):
     return output
 
 
+def validate_project_context(arguments):
+    """Run the deterministic project-context validator without modifying files."""
+    repository = arguments.get("repository", "")
+    if not repository:
+        return "VALIDATION_FAILED\nrepository is required."
+    root = Path(repository).expanduser().resolve()
+    if not root.is_dir():
+        return "VALIDATION_FAILED\nRepository does not exist: %s" % root
+    process = subprocess.run(
+        [sys.executable, str(PROJECT_CONTEXT_VALIDATOR), str(root)],
+        capture_output=True,
+        text=True,
+    )
+    output = "\n".join(
+        value.strip() for value in (process.stdout, process.stderr) if value.strip()
+    )
+    prefix = "VALIDATION_OK" if process.returncode == 0 else "VALIDATION_FAILED"
+    return prefix + ("\n" + output if output else "")
+
+
 TOOLS = [
     {"name": "search_knowledge", "description": "Search local indexed project context, verified usage, libraries, applications, documentation, examples, source code and configuration. Curated context and usage rank first.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "pack_id": {"type": "string"}, "repository": {"type": "string", "description": "Optional Git repository name; use list_repositories first"}, "module": {"type": "string", "description": "Optional Gradle module, for example :api"}, "kind": {"type": "string", "enum": ["context", "usage", "docs", "example", "source", "configuration"]}, "language": {"type": "string"}, "configuration_set": {"type": "string"}, "limit": {"type": "integer", "default": 5}}, "required": ["query"]}},
     {"name": "search_config", "description": "Search raw local configuration values. Specify configuration_set when central configuration has multiple variants.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "configuration_set": {"type": "string"}, "limit": {"type": "integer", "default": 5}}, "required": ["query"]}},
@@ -314,6 +335,7 @@ TOOLS = [
     {"name": "project_context_campaign_start", "description": "Atomically start one repository attempt, increment its attempt counter and capture a safety baseline. Refuses a third attempt.", "inputSchema": {"type": "object", "properties": {"state_file": {"type": "string"}, "repository": {"type": "string"}}, "required": ["state_file", "repository"]}},
     {"name": "project_context_campaign_finish", "description": "Immediately record one repository result. Forces terminal failure if files outside project-context.yaml or docs/usage changed since start.", "inputSchema": {"type": "object", "properties": {"state_file": {"type": "string"}, "repository": {"type": "string"}, "status": {"type": "string", "enum": ["successful", "failed"]}, "message": {"type": "string"}}, "required": ["state_file", "repository", "status"]}},
     {"name": "project_context_campaign_report", "description": "Return current project-context campaign totals.", "inputSchema": {"type": "object", "properties": {"state_file": {"type": "string"}}, "required": ["state_file"]}},
+    {"name": "validate_project_context", "description": "Run the deterministic schema and path validator for all project-context.yaml files in one Git repository. Read-only. Fix every reported error and call again before marking a campaign attempt successful.", "inputSchema": {"type": "object", "properties": {"repository": {"type": "string", "description": "Absolute Git repository path from the campaign queue"}}, "required": ["repository"]}},
 ]
 
 
@@ -344,6 +366,8 @@ def dispatch_tool(name, arguments):
         return text(campaign_state(arguments, "finish"))
     if name == "project_context_campaign_report":
         return text(campaign_state(arguments, "report"))
+    if name == "validate_project_context":
+        return text(validate_project_context(arguments))
     return text("Unknown tool: %s" % name)
 
 
@@ -377,7 +401,7 @@ def handle(message):
         return result(request_id, {
             "protocolVersion": params.get("protocolVersion", "2024-11-05"),
             "capabilities": {"tools": {"listChanged": False}},
-            "serverInfo": {"name": "local-library-mcp", "version": "1.3.0"},
+            "serverInfo": {"name": "local-library-mcp", "version": "1.4.0"},
         })
     if method == "ping":
         return None if request_id is MISSING else result(request_id, {})

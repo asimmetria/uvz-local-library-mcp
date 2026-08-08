@@ -2,12 +2,14 @@
 # Run one primary GigaCode agent across all non-excluded repositories.
 set -Eeuo pipefail
 
-WORKSPACE="${1:?Usage: $0 /path/to/projects [--restart]}"
+WORKSPACE="${1:?Usage: $0 /path/to/projects [--restart] [--reset-validation-failures]}"
 shift
 RESTART=0
+RESET_VALIDATION_FAILURES=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --restart) RESTART=1 ;;
+    --reset-validation-failures) RESET_VALIDATION_FAILURES=1 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
@@ -48,6 +50,9 @@ if [ "$RESTART" = "1" ]; then
   INIT_ARGS+=(--restart)
 fi
 "$PYTHON" "$STATE_TOOL" "${INIT_ARGS[@]}"
+if [ "$RESET_VALIDATION_FAILURES" = "1" ]; then
+  "$PYTHON" "$STATE_TOOL" reset-validation-failures --state "$STATE_FILE"
+fi
 
 PROMPT="$(<"$PROMPT_FILE")"
 PROMPT+=$'\n\n## Параметры текущей кампании\n\n'
@@ -78,6 +83,7 @@ GIGACODE_ARGS=(
   --allowed-tools mcp__local-library-mcp__project_context_campaign_start
   --allowed-tools mcp__local-library-mcp__project_context_campaign_finish
   --allowed-tools mcp__local-library-mcp__project_context_campaign_report
+  --allowed-tools mcp__local-library-mcp__validate_project_context
   --max-session-turns "$MAX_TURNS"
 )
 if [ "$OUTPUT_FORMAT" = "stream-json" ]; then
@@ -102,11 +108,16 @@ set -e
 # again outside the agent and return invalid repositories to the retry queue.
 while IFS= read -r repository; do
   [ -n "$repository" ] || continue
-  if ! "$VALIDATE_TOOL" "$repository"; then
+  set +e
+  VALIDATION_OUTPUT="$("$VALIDATE_TOOL" "$repository" 2>&1)"
+  VALIDATION_CODE=$?
+  set -e
+  printf '%s\n' "$VALIDATION_OUTPUT"
+  if [ "$VALIDATION_CODE" -ne 0 ]; then
     "$PYTHON" "$STATE_TOOL" invalidate \
       --state "$STATE_FILE" \
       --repository "$repository" \
-      --message "Deterministic validation failed after the agent session."
+      --message "Deterministic validation failed after the agent session. $VALIDATION_OUTPUT"
   fi
 done < <("$PYTHON" "$STATE_TOOL" list --state "$STATE_FILE" --status successful)
 

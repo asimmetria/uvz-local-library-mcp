@@ -14,11 +14,11 @@ aliases:
   - example facade
 modules:
   - :example-facade
-purpose: Предоставляет поддерживаемый API для получения данных Example.
+purpose: "Предоставляет поддерживаемый API для получения данных Example."
 use_when:
-  - Нужно получить данные Example из другого модуля.
+  - "Нужно получить данные Example из другого модуля."
 do_not_use_when:
-  - Изменение относится к внутренней реализации приложения-владельца.
+  - "Изменение относится к внутренней реализации приложения-владельца."
 entrypoints:
   - com.example.ExampleFacade
 dependency:
@@ -28,22 +28,28 @@ dependency:
 configuration:
   - key: example.client.url
     required: true
-    description: Адрес приложения-владельца.
+    description: "Адрес приложения-владельца."
 examples:
   - id: get-example
     path: docs/usage/get-example.md
-    summary: Получение Example через facade.
+    summary: "Получение Example через facade."
 evidence:
   - path: example-facade/src/main/java/com/example/ExampleFacade.java
-    proves: Публичная точка входа facade.
+    proves: "Публичная точка входа facade."
 related:
   - example-model-shared
 unknowns:
-  - Требуется подтверждение владельца по retry policy.
+  - "Требуется подтверждение владельца по retry policy."
 ```
 
 Обязательные поля: `schema_version`, `kind`, `name`, `purpose`, `use_when`,
 `evidence`. Не добавляй пустые optional-поля.
+
+Всегда заключай пояснительные YAML-строки в двойные кавычки: `purpose`, каждый
+элемент `use_when`, `do_not_use_when`, `unknowns`, а также `description`,
+`summary` и `proves`. В частности, не оставляй `: ` внутри plain scalar: YAML
+превратит такой элемент списка в mapping, и schema validation завершится
+ошибкой `must contain only non-empty strings`.
 
 Для Gradle `dependency` добавляй только после подтверждения точного alias через
 `suggest_dependency`; укажи `ecosystem: gradle`. Если alias не подтверждён, не
@@ -63,9 +69,9 @@ hardcoded version, если ей управляет platform/BOM/catalog.
 schema_version: 1
 kind: library-suite
 name: example-lib
-purpose: Объединяет независимо подключаемые библиотеки Example.
+purpose: "Объединяет независимо подключаемые библиотеки Example."
 use_when:
-  - Нужно выбрать библиотеку для интеграции с Example.
+  - "Нужно выбрать библиотеку для интеграции с Example."
 components:
   - module: :example-facade
     context: example-facade/project-context.yaml
@@ -73,7 +79,7 @@ components:
     context: example-model-shared/project-context.yaml
 evidence:
   - path: settings.gradle.kts
-    proves: Состав independently buildable модулей.
+    proves: "Состав independently buildable модулей."
 ```
 
 Каждый independently consumable component получает собственную карточку. Не

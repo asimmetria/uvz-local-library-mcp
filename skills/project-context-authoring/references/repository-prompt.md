@@ -26,8 +26,9 @@ RAG, не коммить изменения.
 7. Создавай/изменяй/удаляй файлы только штатными file-editing tools. Запрещены
    shell heredoc/redirection, tee, sed/perl -i и скрипты для записи. Если запись
    вне workspace запрещена, остановись с `blocked_workspace` без обхода.
-8. Не запускай shell-валидатор: runner выполнит его после session. Перед ответом
-   перечитай созданные файлы штатными read tools и проверь paths/schema.
+8. Не запускай shell-валидатор. Вызови read-only MCP `validate_project_context`
+   для текущего Git root, исправь все ошибки и повторяй проверку до
+   `VALIDATION_OK`. Runner независимо повторит проверку после session.
 
 Верни краткий итог: discovered modules, созданные/изменённые/удалённые файлы,
 evidence, unknowns и status (`successful` либо `blocked_workspace`).

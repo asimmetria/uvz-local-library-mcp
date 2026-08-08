@@ -279,6 +279,7 @@ class KnowledgePipelineTest(unittest.TestCase):
             self.assertIn("agent", arguments)
             self.assertIn("run_shell_command", arguments)
             self.assertIn("mcp__local-library-mcp__project_context_campaign_finish", arguments)
+            self.assertIn("mcp__local-library-mcp__validate_project_context", arguments)
             self.assertIn("$project-context-authoring", arguments[-1])
             campaign = json.loads(state.read_text(encoding="utf-8"))
             records = {item["name"]: item for item in campaign["repositories"]}
@@ -294,7 +295,8 @@ class KnowledgePipelineTest(unittest.TestCase):
             workspace = root / "projects"
             retry = workspace / "retry-project"
             unsafe = workspace / "unsafe-project"
-            for project in (retry, unsafe):
+            validation = workspace / "validation-project"
+            for project in (retry, unsafe, validation):
                 project.mkdir(parents=True)
                 (project / "README.md").write_text("# Fixture\n", encoding="utf-8")
                 subprocess.run(["git", "init", str(project)], check=True, capture_output=True)
@@ -347,6 +349,42 @@ class KnowledgePipelineTest(unittest.TestCase):
             self.assertEqual("failed", records["unsafe-project"]["status"])
             self.assertEqual(2, records["unsafe-project"]["attempts"])
             self.assertEqual(["README.md"], records["unsafe-project"]["changed_outside_scope"])
+
+            campaign("start", "--state", state, "--repository", validation)
+            (validation / "project-context.yaml").write_text(
+                "schema_version: 1\n"
+                "kind: application\n"
+                "name: validation-project\n"
+                "purpose: \"Проверяет validator feedback.\"\n"
+                "use_when:\n"
+                "  - Ошибочная строка: превращается в mapping\n"
+                "evidence:\n"
+                "  - path: README.md\n"
+                "    proves: \"Подтверждает fixture.\"\n",
+                encoding="utf-8",
+            )
+            validation_result = server_module.call_tool(
+                "validate_project_context", {"repository": str(validation)}
+            )[0]["text"]
+            self.assertIn("VALIDATION_FAILED", validation_result)
+            self.assertIn("use_when must contain only non-empty strings", validation_result)
+            campaign(
+                "finish", "--state", state, "--repository", validation,
+                "--status", "successful",
+            )
+            campaign(
+                "invalidate", "--state", state, "--repository", validation,
+                "--message", "Deterministic validation failed after the agent session. use_when error",
+            )
+            reset = campaign("reset-validation-failures", "--state", state)
+            self.assertEqual(1, json.loads(reset.stdout)["reset"])
+            records = {
+                item["name"]: item
+                for item in json.loads(state.read_text(encoding="utf-8"))["repositories"]
+            }
+            self.assertEqual("pending", records["validation-project"]["status"])
+            self.assertEqual(0, records["validation-project"]["attempts"])
+            self.assertEqual(1, records["validation-project"]["repair_resets"])
             report = server_module.call_tool(
                 "project_context_campaign_report", {"state_file": str(state)}
             )

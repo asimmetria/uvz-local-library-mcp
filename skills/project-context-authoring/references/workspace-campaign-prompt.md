@@ -7,7 +7,8 @@ $project-context-authoring
 
 Используй только MCP tools `project_context_campaign_next`,
 `project_context_campaign_start`, `project_context_campaign_finish` и
-`project_context_campaign_report`. Во всех вызовах передавай абсолютный
+`project_context_campaign_report`, а для schema-проверки —
+`validate_project_context`. Во всех campaign-вызовах передавай абсолютный
 `state_file`, указанный runner-ом в параметрах текущей кампании.
 
 Для каждого repository строго выполни цикл:
@@ -17,11 +18,12 @@ $project-context-authoring
 2. Сразу вызови `start` для полученного абсолютного пути. Controller атомарно
    запишет `running` и увеличит число попыток. Не обрабатывай repository, если
    `start` отказал.
-3. Обработай только этот repository по правилам скилла. Не переходи к следующему
-   до завершения текущего.
-4. Повторно прочитай созданные файлы и самостоятельно проверь schema и paths
-   штатными read/search tools. Shell недоступен; внешний runner выполнит общую
-   deterministic validation после сессии.
+3. Прочитай `last_message`, возвращённый `next`: если там есть предыдущая ошибка
+   validator-а, сначала исправь её. Обработай только этот repository по правилам
+   скилла и не переходи к следующему до завершения текущего.
+4. Вызови `validate_project_context` с абсолютным путём repository. При
+   `VALIDATION_FAILED` исправь все перечисленные файлы и повтори вызов. Не ставь
+   `successful`, пока последний результат не равен `VALIDATION_OK`.
 5. Сразу после обработки обязательно вызови `project_context_campaign_finish`:
    - успех: `status=successful`, `message="краткий итог"`;
    - ошибка/блокировка: `status=failed`, `message="точная причина"`.
