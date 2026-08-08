@@ -809,11 +809,16 @@ class KnowledgePipelineTest(unittest.TestCase):
                 "--base", ROOT / "evaluation-cases.json",
                 "--output", dependency_draft,
                 "--limit", "3",
+                "--include-external",
             )
             draft_definition = json.loads(dependency_draft.read_text(encoding="utf-8"))
             self.assertTrue(draft_definition["dependency_case_draft"]["review_required"])
             self.assertEqual(
                 3, draft_definition["dependency_case_draft"]["generated_positive_cases"]
+            )
+            self.assertEqual(
+                "all-aliases",
+                draft_definition["dependency_case_draft"]["selection_scope"],
             )
             self.assertEqual(3, draft_definition["thresholds"]["min_dependency_cases"])
             self.assertEqual(
@@ -846,6 +851,23 @@ class KnowledgePipelineTest(unittest.TestCase):
             )
             self.assertNotEqual(0, refused_overwrite.returncode)
             self.assertEqual(original_draft, dependency_draft.read_bytes())
+            internal_draft = workspace / "evaluation-cases.internal.json"
+            self.run_script(
+                "scripts/draft-dependency-cases.py",
+                "--db", database,
+                "--base", ROOT / "evaluation-cases.json",
+                "--output", internal_draft,
+                "--limit", "1",
+            )
+            internal_definition = json.loads(internal_draft.read_text(encoding="utf-8"))
+            self.assertEqual(
+                "internally-owned-aliases",
+                internal_definition["dependency_case_draft"]["selection_scope"],
+            )
+            self.assertEqual(
+                ["fixtureLibrary"],
+                internal_definition["dependency_cases"][0]["expected_aliases"],
+            )
             self.assertEqual(SCHEMA_VERSION, validate_database(database))
             audit_report = json.loads(audit.read_text(encoding="utf-8"))
             self.assertEqual(1, audit_report["duplicate_content_groups"])

@@ -306,7 +306,10 @@ python3 scripts/draft-dependency-cases.py --limit 3
   --evaluation-cases evaluation-cases.local.json
 ```
 
-Генератор не перезаписывает `evaluation-cases.local.json`; подробный review-flow
+По умолчанию генератор выбирает только aliases внутренних библиотек, для которых
+нашёл владельца в индексируемом workspace. Внешние Spring-зависимости и драйверы
+не используются как эталонные cases. Генератор не перезаписывает
+`evaluation-cases.local.json`; подробный review-flow
 описан в [retrieval evaluation](docs/retrieval-evaluation.md). После проверки
 каждого consumer поставь `dependency_case_draft.review_required: false`, иначе
 quality gate намеренно не пройдёт.

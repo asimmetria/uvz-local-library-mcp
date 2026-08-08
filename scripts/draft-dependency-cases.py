@@ -45,6 +45,11 @@ def main():
     parser.add_argument("--base", type=Path, default=ROOT / "evaluation-cases.json")
     parser.add_argument("--output", type=Path, default=ROOT / "evaluation-cases.local.json")
     parser.add_argument("--limit", type=int, default=3, help="Number of distinct positive aliases")
+    parser.add_argument(
+        "--include-external",
+        action="store_true",
+        help="Include aliases that cannot be mapped to an indexed workspace library",
+    )
     options = parser.parse_args()
     if options.limit < 1:
         raise SystemExit("--limit must be positive")
@@ -60,17 +65,23 @@ def main():
     connection = sqlite3.connect(options.db)
     connection.row_factory = sqlite3.Row
     try:
-        rows = connection.execute(
+        query = (
             "SELECT alias.alias, alias.accessor, alias.catalog_repository, alias.catalog_path, "
+            "alias.owner_repository, alias.owner_module, "
             "usage.consumer_repository, usage.consumer_module, usage.path, "
             "usage.configuration, usage.line "
             "FROM dependency_aliases AS alias JOIN dependency_usages AS usage ON "
             "usage.catalog_repository = alias.catalog_repository AND "
             "usage.catalog_path = alias.catalog_path AND usage.alias = alias.alias "
             "WHERE usage.configuration != 'unknown' "
+        )
+        if not options.include_external:
+            query += "AND alias.owner_repository != '' "
+        query += (
             "ORDER BY alias.alias, usage.consumer_repository, usage.consumer_module, "
             "usage.path, usage.line"
-        ).fetchall()
+        )
+        rows = connection.execute(query).fetchall()
     finally:
         connection.close()
     grouped = {}
@@ -82,9 +93,11 @@ def main():
         key=lambda item: (-len(item["consumers"]), item["alias"]["alias"], item["alias"]["catalog_path"]),
     )
     if len(candidates) < options.limit:
+        scope = "aliases" if options.include_external else "internally owned aliases"
         raise SystemExit(
-            "Only %d distinct aliases with verified consumers are available; requested %d"
-            % (len(candidates), options.limit)
+            "Only %d %s with verified consumers are available; requested %d. "
+            "Use --include-external only when external framework dependencies are intentional."
+            % (len(candidates), scope, options.limit)
         )
     existing = list(definition.get("dependency_cases", []))
     used_ids = {case.get("id", "") for case in definition.get("cases", []) + existing}
@@ -118,6 +131,9 @@ def main():
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "database_sha256": digest(options.db),
         "generated_positive_cases": len(generated),
+        "selection_scope": (
+            "all-aliases" if options.include_external else "internally-owned-aliases"
+        ),
         "instruction": (
             "Review every alias and consumer against the source, then set "
             "review_required to false before using this file as a gate."
