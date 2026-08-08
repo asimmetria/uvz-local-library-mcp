@@ -66,6 +66,53 @@ class KnowledgePipelineTest(unittest.TestCase):
         )
         self.assertEqual("synced", sync_progress("synced"))
 
+    def test_authoring_worktree_check_ignores_generated_caches_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory) / "fixture"
+            repository.mkdir()
+            subprocess.run(["git", "init", str(repository)], check=True, capture_output=True)
+            (repository / "settings.gradle.kts").write_text(
+                'rootProject.name = "fixture"\n', encoding="utf-8"
+            )
+            subprocess.run(
+                ["git", "-C", str(repository), "add", "settings.gradle.kts"],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [
+                    "git", "-C", str(repository),
+                    "-c", "user.name=Fixture",
+                    "-c", "user.email=fixture@example.invalid",
+                    "commit", "-m", "Fixture",
+                ],
+                check=True,
+                capture_output=True,
+            )
+            cache = repository / "nested/.gradle/buildOutputCleanup/cache.properties"
+            cache.parent.mkdir(parents=True)
+            cache.write_text("generated=true\n", encoding="utf-8")
+            check_script = (
+                ROOT / "skills/project-context-authoring/scripts/check-authoring-worktree.sh"
+            )
+            generated_only = subprocess.run(
+                ["bash", str(check_script), str(repository)],
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(0, generated_only.returncode, generated_only.stdout)
+
+            source = repository / "src/main/kotlin/demo/Changed.kt"
+            source.parent.mkdir(parents=True)
+            source.write_text("class Changed\n", encoding="utf-8")
+            source_change = subprocess.run(
+                ["bash", str(check_script), str(repository)],
+                text=True,
+                capture_output=True,
+            )
+            self.assertNotEqual(0, source_change.returncode)
+            self.assertIn("src/main/kotlin/demo/Changed.kt", source_change.stdout)
+
     def test_structured_catalog_and_comment_free_usage_extraction(self):
         catalog = parse_version_catalog(
             '[versions]\nfixture = "1.2.3"\nstrict = { strictly = "4.0" }\n\n'

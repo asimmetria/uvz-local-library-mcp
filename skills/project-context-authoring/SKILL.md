@@ -14,6 +14,10 @@ description: "Создаёт и проверяет project-context.yaml и docs/
   repository. В workspace-режиме оставайся единственным основным агентом и
   строго последовательно проходи campaign state по правилам
   [workspace-campaign-prompt.md](references/workspace-campaign-prompt.md).
+- Не пропускай repository из-за размера, количества модулей, composite build,
+  `includeBuild` или сложности структуры. Это не допустимые причины для
+  `failed`: сначала составь полную очередь build roots/модулей, затем обработай
+  её последовательно и проверь все созданные карточки.
 - Для workspace используй bundled `scripts/run-all-project-contexts.sh`. Он
   включает все найденные Git repositories независимо от dirty-статуса и
   исключает только точные имена из `index-exclude.txt`.

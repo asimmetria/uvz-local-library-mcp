@@ -14,6 +14,14 @@ while IFS= read -r changed; do
   [ -n "$changed" ] || continue
   path="${changed:3}"
   path="${path##* -> }"
+  # Nested Gradle/Maven/npm builds can leave untracked generated state even in
+  # otherwise clean repositories. It is neither authoring input nor a user
+  # source change, so do not make developers delete it to run the skill.
+  case "/$path/" in
+    */.gradle/*|*/build/*|*/target/*|*/node_modules/*)
+      continue
+      ;;
+  esac
   case "$path" in
     project-context.yaml|*/project-context.yaml|docs/usage/*.md|*/docs/usage/*.md)
       ;;
