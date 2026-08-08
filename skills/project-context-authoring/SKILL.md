@@ -10,10 +10,20 @@ description: "Создаёт и проверяет project-context.yaml и docs/
 
 ## Жёсткие правила
 
-- Обрабатывай ровно один Git repository в одной agent session. Не запускай
-  субагентов и не пытайся редактировать соседние repositories. Для всей
-  workspace используй bundled `scripts/run-all-project-contexts.sh`, который
-  создаёт отдельную session из корня каждого repository.
+- Не запускай субагентов. В одиночном режиме обрабатывай ровно один Git
+  repository. В workspace-режиме оставайся единственным основным агентом и
+  строго последовательно проходи campaign state по правилам
+  [workspace-campaign-prompt.md](references/workspace-campaign-prompt.md).
+- Для workspace используй bundled `scripts/run-all-project-contexts.sh`. Он
+  включает все найденные Git repositories независимо от dirty-статуса и
+  исключает только точные имена из `index-exclude.txt`.
+- В workspace-режиме перед каждой попыткой вызывай campaign `start`, а сразу
+  после repository — `finish`, чтобы state-файл обновлялся немедленно. Не
+  превышай две попытки: controller технически запрещает третью. `successful`
+  повторно не обрабатывай.
+- Dirty не является причиной пропуска. Никогда не выполняй checkout, reset,
+  clean, stash, restore или commit. Сохраняй существующие изменения; разрешённая
+  область authoring остаётся только `project-context.yaml` и `docs/usage/*.md`.
 - Создавай, изменяй и удаляй файлы только штатными file-editing tools агента.
   Не используй shell redirection, heredoc, `tee`, `sed -i`, `perl -i` или
   Python/Node scripts как обход запрета на запись. Если file tool сообщает, что
@@ -58,9 +68,10 @@ description: "Создаёт и проверяет project-context.yaml и docs/
    пробел в `unknowns`.
 7. Повторно открой созданные файлы и выполни финальную проверку ниже.
 8. Не запускай shell-валидатор из agent session: внешний runner выполнит его
-   после завершения. Сам проверь schema и пути штатными read/search tools. Не
-   объявляй работу завершённой, если запись заблокирована или проверка файлов
-   выявила ошибку.
+   после завершения. Сам проверь schema и пути штатными read/search tools. В
+   workspace-режиме зафиксируй результат текущего repository через campaign
+   `finish` до перехода к следующему. Не объявляй работу завершённой, если
+   запись заблокирована или проверка файлов выявила ошибку.
 
 ## Dependency
 
@@ -86,3 +97,14 @@ build descriptor, registry metadata в репозитории или сущес�
 - relative evidence paths существуют, а абсолютных локальных путей нет;
 - в примерах внутренних Gradle-зависимостей нет hardcoded version;
 - в отчёте перечислены изменённые файлы, ключевые evidence и `unknowns`.
+
+## Workspace-кампания
+
+Для большого каталога repositories запусти
+`scripts/run-all-project-contexts.sh /path/to/projects`. Один основной агент
+читает очередь из `.project-context-authoring-campaign.json`, не создаёт
+субагентов и сразу сохраняет результат каждого repository. При прерывании
+повторный запуск продолжает `pending` и `failed` с числом попыток меньше двух.
+Точные исключения задаются по одному имени директории на строку в
+`index-exclude.txt`. Запуск с `--restart` создаёт backup state и начинает новую
+кампанию.

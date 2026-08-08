@@ -3,3 +3,4 @@
 # Comments and blank lines are ignored.
 #
 # example-internal-project
+# uvz-local-library-mcp

@@ -175,13 +175,14 @@ class KnowledgePipelineTest(unittest.TestCase):
         self.assertTrue(verified["results"][0]["provenance_valid"])
         connection.close()
 
-    def test_safe_sequential_authoring_runner(self):
+    def test_one_agent_authoring_campaign_includes_dirty_and_tracks_every_repository(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             workspace = root / "projects"
             clean = workspace / "clean-project"
             dirty = workspace / "dirty-project"
-            for project in (clean, dirty):
+            excluded = workspace / "excluded-project"
+            for project in (clean, dirty, excluded):
                 project.mkdir(parents=True)
                 (project / "README.md").write_text(
                     "# Fixture\n\nТестовый проект.\n", encoding="utf-8"
@@ -198,106 +199,153 @@ class KnowledgePipelineTest(unittest.TestCase):
                     check=True,
                     capture_output=True,
                 )
-            (dirty / "README.md").write_text(
-                "# Fixture\n\nНезавершённое изменение пользователя.\n", encoding="utf-8"
-            )
+            dirty_text = "# Fixture\n\nНезавершённое изменение пользователя.\n"
+            (dirty / "README.md").write_text(dirty_text, encoding="utf-8")
+            exclude_file = root / "index-exclude.txt"
+            exclude_file.write_text("excluded-project\n", encoding="utf-8")
+
             fake_bin = root / "bin"
             fake_bin.mkdir()
             calls = root / "gigacode-calls.jsonl"
             fake_gigacode = fake_bin / "gigacode"
             fake_gigacode.write_text(
                 "#!/usr/bin/env python3\n"
-                "import json, os, sys\n"
+                "import json, os, subprocess, sys\n"
                 "from pathlib import Path\n"
                 "with Path(os.environ['FAKE_GIGACODE_CALLS']).open('a', encoding='utf-8') as out:\n"
                 "    out.write(json.dumps({'cwd': str(Path.cwd()), 'args': sys.argv[1:]}, ensure_ascii=False) + '\\n')\n"
-                "name = Path.cwd().name\n"
-                "Path('project-context.yaml').write_text(\n"
-                "    'schema_version: 1\\n'\n"
-                "    'kind: application\\n'\n"
-                "    f'name: {name}\\n'\n"
-                "    'purpose: Описывает тестовое приложение.\\n'\n"
-                "    'use_when:\\n  - Нужно проверить безопасный runner.\\n'\n"
-                "    'evidence:\\n  - path: README.md\\n    proves: Подтверждает назначение проекта.\\n',\n"
-                "    encoding='utf-8',\n"
-                ")\n"
-                "if os.environ.get('FAKE_GIGACODE_UNSAFE') == '1':\n"
-                "    Path('README.md').write_text('# Unsafe\\n', encoding='utf-8')\n"
-                "print('fake gigacode completed')\n",
+                "tool = os.environ['FAKE_CAMPAIGN_TOOL']\n"
+                "state = os.environ['PROJECT_CONTEXT_STATE_FILE']\n"
+                "while True:\n"
+                "    next_run = subprocess.run([sys.executable, tool, 'next', '--state', state], text=True, capture_output=True)\n"
+                "    if next_run.returncode == 10:\n"
+                "        break\n"
+                "    item = json.loads(next_run.stdout)\n"
+                "    repository = Path(item['path'])\n"
+                "    subprocess.run([sys.executable, tool, 'start', '--state', state, '--repository', str(repository)], check=True)\n"
+                "    (repository / 'project-context.yaml').write_text('fixture', encoding='utf-8')\n"
+                "    subprocess.run([sys.executable, tool, 'finish', '--state', state, '--repository', str(repository), '--status', 'successful'], check=True)\n"
+                "print('fake primary agent completed')\n",
                 encoding="utf-8",
             )
             fake_gigacode.chmod(0o755)
-            state = root / "authoring-state.tsv"
-            logs = root / "logs"
+            fake_site = root / "fake-site"
+            fake_site.mkdir()
+            (fake_site / "yaml.py").write_text(
+                "def safe_load(_text):\n"
+                "    return {\n"
+                "        'schema_version': 1,\n"
+                "        'kind': 'application',\n"
+                "        'name': 'fixture',\n"
+                "        'purpose': 'Описывает тестовое приложение.',\n"
+                "        'use_when': ['Нужно проверить безопасную кампанию.'],\n"
+                "        'evidence': [{'path': 'README.md', 'proves': 'Подтверждает назначение проекта.'}],\n"
+                "    }\n",
+                encoding="utf-8",
+            )
+            state = root / "authoring-campaign.json"
+            state_tool = ROOT / "skills/project-context-authoring/scripts/project-context-campaign-state.py"
             environment = os.environ.copy()
             environment.update({
                 "PATH": str(fake_bin) + os.pathsep + environment.get("PATH", ""),
                 "FAKE_GIGACODE_CALLS": str(calls),
+                "FAKE_CAMPAIGN_TOOL": str(state_tool),
                 "PROJECT_CONTEXT_STATE_FILE": str(state),
-                "PROJECT_CONTEXT_LOG_DIR": str(logs),
                 "PROJECT_CONTEXT_OUTPUT_FORMAT": "text",
+                "INDEX_EXCLUDE_FILE": str(exclude_file),
                 "PYTHON_BIN": sys.executable,
+                "PYTHONPATH": str(fake_site),
             })
             runner = ROOT / "skills/project-context-authoring/scripts/run-all-project-contexts.sh"
-            first = subprocess.run(
+            result = subprocess.run(
                 ["bash", str(runner), str(workspace)],
                 cwd=ROOT,
                 env=environment,
                 text=True,
                 capture_output=True,
             )
-            self.assertEqual(0, first.returncode, first.stdout + first.stderr)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
             invocations = [json.loads(line) for line in calls.read_text(encoding="utf-8").splitlines()]
             self.assertEqual(1, len(invocations))
-            self.assertEqual(clean.resolve(), Path(invocations[0]["cwd"]).resolve())
+            self.assertEqual(workspace.resolve(), Path(invocations[0]["cwd"]).resolve())
             arguments = invocations[0]["args"]
             self.assertIn("--approval-mode=auto-edit", arguments)
-            self.assertIn("--allowed-mcp-server-names", arguments)
-            self.assertIn("mcp__local-library-mcp__suggest_dependency", arguments)
-            self.assertIn("mcp__local-library-mcp__find_library_usages", arguments)
+            self.assertIn("--exclude-tools", arguments)
+            self.assertIn("agent", arguments)
+            self.assertIn("run_shell_command", arguments)
+            self.assertIn("mcp__local-library-mcp__project_context_campaign_finish", arguments)
             self.assertIn("$project-context-authoring", arguments[-1])
-            self.assertIn("SKIPPED_DIRTY", first.stdout)
-            self.assertTrue((clean / "project-context.yaml").is_file())
-            self.assertFalse((dirty / "project-context.yaml").exists())
-            self.assertIn("successful", state.read_text(encoding="utf-8"))
-            self.assertIn("skipped_dirty", state.read_text(encoding="utf-8"))
-            second = subprocess.run(
-                ["bash", str(runner), str(workspace)],
-                cwd=ROOT,
-                env=environment,
-                text=True,
-                capture_output=True,
+            campaign = json.loads(state.read_text(encoding="utf-8"))
+            records = {item["name"]: item for item in campaign["repositories"]}
+            self.assertEqual({"clean-project", "dirty-project"}, set(records))
+            self.assertTrue(all(item["status"] == "successful" for item in records.values()))
+            self.assertTrue(all(item["attempts"] == 1 for item in records.values()))
+            self.assertEqual(dirty_text, (dirty / "README.md").read_text(encoding="utf-8"))
+            self.assertFalse((excluded / "project-context.yaml").exists())
+
+    def test_authoring_campaign_enforces_two_attempts_and_safety_scope(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "projects"
+            retry = workspace / "retry-project"
+            unsafe = workspace / "unsafe-project"
+            for project in (retry, unsafe):
+                project.mkdir(parents=True)
+                (project / "README.md").write_text("# Fixture\n", encoding="utf-8")
+                subprocess.run(["git", "init", str(project)], check=True, capture_output=True)
+                subprocess.run(["git", "-C", str(project), "add", "."], check=True)
+                subprocess.run(
+                    [
+                        "git", "-C", str(project),
+                        "-c", "user.name=Fixture",
+                        "-c", "user.email=fixture@example.invalid",
+                        "commit", "-m", "Fixture",
+                    ],
+                    check=True,
+                    capture_output=True,
+                )
+            state = root / "campaign.json"
+            tool = ROOT / "skills/project-context-authoring/scripts/project-context-campaign-state.py"
+
+            def campaign(*arguments, check=True):
+                return subprocess.run(
+                    [sys.executable, str(tool), *map(str, arguments)],
+                    text=True,
+                    capture_output=True,
+                    check=check,
+                )
+
+            campaign("init", "--workspace", workspace, "--state", state)
+            for attempt in range(2):
+                campaign("start", "--state", state, "--repository", retry)
+                campaign(
+                    "finish", "--state", state, "--repository", retry,
+                    "--status", "failed", "--message", f"attempt {attempt + 1}",
+                )
+            third = campaign(
+                "start", "--state", state, "--repository", retry, check=False
             )
-            self.assertEqual(0, second.returncode, second.stdout + second.stderr)
-            self.assertIn("Уже успешно обработан", second.stdout)
-            self.assertEqual(1, len(calls.read_text(encoding="utf-8").splitlines()))
-            unsafe = root / "unsafe-project"
-            unsafe.mkdir()
-            (unsafe / "README.md").write_text("# Safe before agent\n", encoding="utf-8")
-            subprocess.run(["git", "init", str(unsafe)], check=True, capture_output=True)
-            subprocess.run(["git", "-C", str(unsafe), "add", "."], check=True)
-            subprocess.run(
-                [
-                    "git", "-C", str(unsafe),
-                    "-c", "user.name=Fixture",
-                    "-c", "user.email=fixture@example.invalid",
-                    "commit", "-m", "Fixture",
-                ],
-                check=True,
-                capture_output=True,
+            self.assertNotEqual(0, third.returncode)
+            self.assertIn("Attempt limit (2) reached", third.stderr)
+
+            campaign("start", "--state", state, "--repository", unsafe)
+            (unsafe / "README.md").write_text("# Unauthorized change\n", encoding="utf-8")
+            finish = campaign(
+                "finish", "--state", state, "--repository", unsafe,
+                "--status", "successful", check=False,
             )
-            unsafe_environment = {**environment, "FAKE_GIGACODE_UNSAFE": "1"}
-            one_runner = ROOT / "skills/project-context-authoring/scripts/run-project-context.sh"
-            unsafe_result = subprocess.run(
-                ["bash", str(one_runner), str(unsafe)],
-                cwd=ROOT,
-                env=unsafe_environment,
-                text=True,
-                capture_output=True,
+            self.assertEqual(6, finish.returncode)
+            records = {
+                item["name"]: item
+                for item in json.loads(state.read_text(encoding="utf-8"))["repositories"]
+            }
+            self.assertEqual("failed", records["unsafe-project"]["status"])
+            self.assertEqual(2, records["unsafe-project"]["attempts"])
+            self.assertEqual(["README.md"], records["unsafe-project"]["changed_outside_scope"])
+            report = server_module.call_tool(
+                "project_context_campaign_report", {"state_file": str(state)}
             )
-            self.assertEqual(4, unsafe_result.returncode)
-            self.assertIn("FAILED SAFETY CHECK", unsafe_result.stderr)
-            self.assertIn(" M README.md", unsafe_result.stdout)
+            self.assertIn('"terminal_failed": 2', report[0]["text"])
 
     def test_project_context_rejects_non_portable_or_missing_evidence(self):
         with tempfile.TemporaryDirectory() as directory:

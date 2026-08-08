@@ -3,6 +3,7 @@
 import json
 import re
 import sqlite3
+import subprocess
 import sys
 from pathlib import Path
 
@@ -19,6 +20,7 @@ BASE = Path(__file__).parent
 DB_PATH = BASE / "knowledge.db"
 CATALOG_PATH = BASE / "skills" / "library-knowledge-workflow" / "generated-catalog.md"
 AUDIT_PATH = BASE / "audit-summary.json"
+CAMPAIGN_TOOL = BASE / "skills" / "project-context-authoring" / "scripts" / "project-context-campaign-state.py"
 
 
 def db():
@@ -271,6 +273,33 @@ def resolve_config(arguments):
     return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
 
 
+def campaign_state(arguments, action):
+    """Run one constrained authoring campaign state transition."""
+    if not CAMPAIGN_TOOL.is_file():
+        return "Project-context campaign controller is not installed."
+    state_file = arguments.get("state_file", "")
+    if not state_file:
+        return "state_file is required."
+    command = [sys.executable, str(CAMPAIGN_TOOL), action, "--state", state_file]
+    if action in {"start", "finish"}:
+        repository = arguments.get("repository", "")
+        if not repository:
+            return "repository is required."
+        command.extend(["--repository", repository])
+    if action == "finish":
+        status = arguments.get("status", "")
+        if status not in {"successful", "failed"}:
+            return "status must be successful or failed."
+        command.extend(["--status", status, "--message", arguments.get("message", "")])
+    process = subprocess.run(command, capture_output=True, text=True)
+    output = process.stdout.strip() or process.stderr.strip()
+    if process.returncode == 10 and action == "next":
+        return "NO_ELIGIBLE_REPOSITORIES"
+    if process.returncode:
+        return "Campaign state transition refused (exit %d): %s" % (process.returncode, output)
+    return output
+
+
 TOOLS = [
     {"name": "search_knowledge", "description": "Search local indexed project context, verified usage, libraries, applications, documentation, examples, source code and configuration. Curated context and usage rank first.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "pack_id": {"type": "string"}, "repository": {"type": "string", "description": "Optional Git repository name; use list_repositories first"}, "module": {"type": "string", "description": "Optional Gradle module, for example :api"}, "kind": {"type": "string", "enum": ["context", "usage", "docs", "example", "source", "configuration"]}, "language": {"type": "string"}, "configuration_set": {"type": "string"}, "limit": {"type": "integer", "default": 5}}, "required": ["query"]}},
     {"name": "search_config", "description": "Search raw local configuration values. Specify configuration_set when central configuration has multiple variants.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "configuration_set": {"type": "string"}, "limit": {"type": "integer", "default": 5}}, "required": ["query"]}},
@@ -281,6 +310,10 @@ TOOLS = [
     {"name": "list_libraries", "description": "List local generated catalog entries and their capabilities.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "list_repositories", "description": "List all indexed Git repositories, including applications, with chunk counts and discovered Gradle modules.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "index_status", "description": "Show the last local ingestion audit summary.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "project_context_campaign_next", "description": "Return the next eligible repository in the active project-context campaign. A repository is never returned after success or after two attempts.", "inputSchema": {"type": "object", "properties": {"state_file": {"type": "string", "description": "Absolute campaign state path supplied by the runner"}}, "required": ["state_file"]}},
+    {"name": "project_context_campaign_start", "description": "Atomically start one repository attempt, increment its attempt counter and capture a safety baseline. Refuses a third attempt.", "inputSchema": {"type": "object", "properties": {"state_file": {"type": "string"}, "repository": {"type": "string"}}, "required": ["state_file", "repository"]}},
+    {"name": "project_context_campaign_finish", "description": "Immediately record one repository result. Forces terminal failure if files outside project-context.yaml or docs/usage changed since start.", "inputSchema": {"type": "object", "properties": {"state_file": {"type": "string"}, "repository": {"type": "string"}, "status": {"type": "string", "enum": ["successful", "failed"]}, "message": {"type": "string"}}, "required": ["state_file", "repository", "status"]}},
+    {"name": "project_context_campaign_report", "description": "Return current project-context campaign totals.", "inputSchema": {"type": "object", "properties": {"state_file": {"type": "string"}}, "required": ["state_file"]}},
 ]
 
 
@@ -303,6 +336,14 @@ def dispatch_tool(name, arguments):
         return text(repositories())
     if name == "index_status":
         return text(AUDIT_PATH.read_text(encoding="utf-8") if AUDIT_PATH.exists() else "No local index run found.")
+    if name == "project_context_campaign_next":
+        return text(campaign_state(arguments, "next"))
+    if name == "project_context_campaign_start":
+        return text(campaign_state(arguments, "start"))
+    if name == "project_context_campaign_finish":
+        return text(campaign_state(arguments, "finish"))
+    if name == "project_context_campaign_report":
+        return text(campaign_state(arguments, "report"))
     return text("Unknown tool: %s" % name)
 
 
@@ -336,7 +377,7 @@ def handle(message):
         return result(request_id, {
             "protocolVersion": params.get("protocolVersion", "2024-11-05"),
             "capabilities": {"tools": {"listChanged": False}},
-            "serverInfo": {"name": "local-library-mcp", "version": "1.2.0"},
+            "serverInfo": {"name": "local-library-mcp", "version": "1.3.0"},
         })
     if method == "ping":
         return None if request_id is MISSING else result(request_id, {})

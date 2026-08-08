@@ -127,10 +127,9 @@ Authoring skill устанавливается только maintainer-у:
 ./scripts/install-project-context-authoring.sh
 ```
 
-После установки перезапусти GigaCode. Не запускай один workspace-wide prompt и
-не используй repository-субагентов: их file tools часто не имеют права писать в
-соседние Git roots и начинают запрашивать approvals либо обходить sandbox через
-shell.
+После установки перезапусти GigaCode. Workspace обрабатывает один основной
+агент, без субагентов. Shell tool у него отключён, поэтому он не сможет обходить
+file-editing policy через heredoc или перенаправление вывода.
 
 ### Последовательная обработка всей workspace
 
@@ -143,31 +142,33 @@ shell.
 
 Runner:
 
-- находит все Git repositories и обрабатывает их строго по одному;
-- для каждого запускает новый GigaCode-процесс из корня этого repository,
-  поэтому штатные file-editing tools находятся внутри разрешённого workspace;
+- находит все Git repositories и передаёт их одному основному GigaCode-агенту;
+- основной агент обрабатывает repositories строго последовательно и не запускает
+  субагентов;
 - включает `auto-edit` и заранее разрешает только read-only MCP tools
-  `suggest_dependency` и `find_library_usages`;
-- запрещает агенту создавать файлы через shell/heredoc;
-- до и после session проверяет Git worktree и завершает repository со статусом
-  failed, если агент изменил файл вне `project-context.yaml` или
-  `docs/usage/*.md`; подозрительные изменения не откатываются автоматически;
-- показывает live `stream-json` и сохраняет отдельный log каждого repository;
-- пропускает repositories с посторонними dirty-изменениями;
-- после каждой session запускает deterministic validator;
-- записывает resume-state и при повторном запуске пропускает уже успешный
-  repository на том же commit, если его карточки всё ещё валидны.
+  `suggest_dependency`, `find_library_usages` и четыре campaign-state tools;
+- полностью отключает agent/subagent и shell tools;
+- не проверяет dirty как условие допуска: незакоммиченные repositories тоже
+  обрабатываются, а существующие изменения запрещено сбрасывать или затирать;
+- перед каждой попыткой controller сохраняет fingerprint файлов вне authoring
+  scope; при изменении любого такого файла repository получает terminal
+  `failed`, а третья попытка запрещена;
+- сразу после каждого repository атомарно записывает `successful` или `failed`;
+- делает не больше двух попыток на один repository;
+- после agent session повторно запускает deterministic validator для всех
+  успешных карточек.
 
-State и logs локальны и игнорируются Git:
+State локален и игнорируется Git:
 
 ```text
-.project-context-authoring-state.tsv
-.project-context-authoring-logs/
+.project-context-authoring-campaign.json
 ```
 
-После прерывания просто повтори ту же команду. Для сознательного полного
-перезапуска используй `--restart`: старый state будет перемещён в timestamped
-backup, а не удалён.
+В файле видны имя, абсолютный путь, status, число попыток и время завершения
+каждого repository. Он обновляется немедленно после обработки. После прерывания
+просто повтори ту же команду: `successful` пропускаются, а `pending`/`failed`
+возобновляются, пока не исчерпаны две попытки. Для сознательного полного
+перезапуска используй `--restart`: старый state копируется в timestamped backup.
 
 ```bash
 ./skills/project-context-authoring/scripts/run-all-project-contexts.sh \
@@ -182,7 +183,8 @@ PROJECT_CONTEXT_OUTPUT_FORMAT=text \
   "/path/to/projects"
 ```
 
-Один repository можно обработать тем же безопасным способом:
+Один repository можно обработать отдельно. В этом точечном режиме прежняя
+строгая проверка не разрешает посторонние dirty-изменения:
 
 ```bash
 ./skills/project-context-authoring/scripts/run-project-context.sh \

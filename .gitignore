@@ -13,3 +13,5 @@ index-exclude.txt
 .project-context-authoring-state.tsv
 .project-context-authoring-state.tsv.*.bak
 .project-context-authoring-logs/
+.project-context-authoring-campaign.json
+.project-context-authoring-campaign.json.*.bak
