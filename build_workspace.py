@@ -4,6 +4,7 @@
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,21 @@ def excluded_names(path):
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.split("#", 1)[0].strip()
     }
+
+
+def invalid_git_revisions(roots):
+    invalid = []
+    for root in sorted(roots):
+        result = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--verify", "HEAD"],
+            text=True,
+            capture_output=True,
+        )
+        revision = result.stdout.strip()
+        if result.returncode or not re.fullmatch(r"[0-9a-f]{40,64}", revision):
+            reason = result.stderr.strip().splitlines()
+            invalid.append((root, reason[-1] if reason else "no commit at HEAD"))
+    return invalid
 
 
 def main():
@@ -50,6 +66,17 @@ def main():
         raise SystemExit("No Git repositories found under %s" % workspace)
     if skipped:
         print("Excluded from indexing: " + ", ".join(skipped), flush=True)
+    invalid = invalid_git_revisions(roots)
+    if invalid:
+        details = "\n".join(
+            "- %s (%s): %s" % (root.name, root, reason)
+            for root, reason in invalid
+        )
+        raise SystemExit(
+            "Cannot build the index because these repositories have no valid Git HEAD:\n"
+            + details
+            + "\nFix the repository or add its directory name to the index exclude file."
+        )
     output_dir = options.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     final = {

@@ -66,6 +66,27 @@ class KnowledgePipelineTest(unittest.TestCase):
         )
         self.assertEqual("synced", sync_progress("synced"))
 
+    def test_workspace_build_rejects_repository_without_commit_before_indexing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory) / "workspace"
+            repository = workspace / "empty-repository"
+            repository.mkdir(parents=True)
+            subprocess.run(
+                ["git", "init", str(repository)], check=True, capture_output=True
+            )
+            cases = Path(directory) / "evaluation-cases.json"
+            cases.write_text('{"version": 1, "cases": []}', encoding="utf-8")
+            result = self.run_script(
+                "build_workspace.py",
+                workspace,
+                "--evaluation-cases", cases,
+                check=False,
+            )
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("empty-repository", result.stderr)
+            self.assertIn("no valid Git HEAD", result.stderr)
+            self.assertNotIn("[1/1]", result.stdout)
+
     def test_authoring_worktree_check_ignores_generated_caches_only(self):
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory) / "fixture"
@@ -709,7 +730,8 @@ class KnowledgePipelineTest(unittest.TestCase):
                     {
                         "id": "fixture-fetch",
                         "query": "fetchItems",
-                        "expected_sources": ["fixture-project:src/main/kotlin/demo/Example.kt"],
+                        "filters": {"path": "src/main/kotlin/demo/Example.kt"},
+                        "expected_paths": ["src/main/kotlin/demo/Example.kt"],
                     },
                     {
                         "id": "fixture-dependency-implementation",

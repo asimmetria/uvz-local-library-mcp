@@ -21,10 +21,8 @@
     {
       "id": "facade-usage",
       "query": "ReceiveInboundMessageFacade receive message",
-      "filters": {"repository": "example-facade"},
-      "expected_sources": [
-        "example-facade:docs/usage/receive-inbound-message.md"
-      ]
+      "filters": {"path": "docs/usage/receive-inbound-message.md"},
+      "expected_paths": ["docs/usage/receive-inbound-message.md"]
     },
     {
       "id": "unknown-api",
@@ -55,11 +53,13 @@
 }
 ```
 
-`expected_sources` использует точный формат `repository:relative/path` и может
-содержать несколько допустимых альтернатив. Один positive case считается
-найденным, когда хотя бы один ожидаемый source появляется в top K.
+`expected_sources` использует точный формат `repository:relative/path`.
+`expected_paths` проверяет только стабильный путь внутри repository и подходит,
+когда локальное имя каталога клона может отличаться. Оба поля могут содержать
+несколько допустимых альтернатив. Один positive case считается найденным,
+когда хотя бы один ожидаемый source или path появляется в top K.
 Для negative case поиск обязан вернуть пустой результат. Опциональные filters:
-`repository`, `module`, `kind`, `language`.
+`repository`, `module`, `kind`, `language`, `path`.
 
 `dependency_cases` проверяет не FTS-текст, а структурные таблицы usage graph.
 `expected_aliases` содержит исходные aliases из version catalog.

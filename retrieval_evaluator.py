@@ -92,7 +92,7 @@ def search(connection, query, limit, filters=None):
     filters = filters or {}
     clauses = []
     parameters = [expression]
-    for field in ("repository", "module", "kind", "language"):
+    for field in ("repository", "module", "kind", "language", "path"):
         if filters.get(field):
             clauses.append(field + " = ?")
             parameters.append(filters[field])
@@ -143,6 +143,7 @@ def evaluate(connection, definition):
         rows = search(connection, query, top_k, case.get("filters"))
         retrieved = [source_name(row) for row in rows]
         expected = case.get("expected_sources", [])
+        expected_paths = case.get("expected_paths", [])
         expect_no_results = bool(case.get("expect_no_results"))
         matching_ranks = []
         if expect_no_results:
@@ -151,10 +152,18 @@ def evaluate(connection, definition):
             reciprocal_rank = None
             recall = None
         else:
-            if not expected:
-                raise ValueError("Positive retrieval case %s has no expected_sources" % identifier)
+            if not expected and not expected_paths:
+                raise ValueError(
+                    "Positive retrieval case %s has no expected_sources or expected_paths"
+                    % identifier
+                )
             expected_set = set(expected)
-            matching_ranks = [index for index, source in enumerate(retrieved, 1) if source in expected_set]
+            expected_path_set = set(expected_paths)
+            matching_ranks = [
+                index
+                for index, (source, row) in enumerate(zip(retrieved, rows), 1)
+                if source in expected_set or row["path"] in expected_path_set
+            ]
             reciprocal_rank = 1.0 / matching_ranks[0] if matching_ranks else 0.0
             recall = 1.0 if matching_ranks else 0.0
             positive_reciprocal_ranks.append(reciprocal_rank)
@@ -165,6 +174,7 @@ def evaluate(connection, definition):
             "query": query,
             "top_k": top_k,
             "expected_sources": expected,
+            "expected_paths": expected_paths,
             "expect_no_results": expect_no_results,
             "retrieved_sources": retrieved,
             "matched_source": retrieved[matching_ranks[0] - 1] if matching_ranks else None,
