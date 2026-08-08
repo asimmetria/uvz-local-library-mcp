@@ -5,44 +5,49 @@ set -Eeuo pipefail
 PROJECT="${1:?Usage: $0 /path/to/one-project}"
 PROJECT="$(cd "$PROJECT" && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+PROMPT_FILE="$SCRIPT_DIR/../references/repository-prompt.md"
+CHECK_WORKTREE="$SCRIPT_DIR/check-authoring-worktree.sh"
 
 if ! command -v gigacode >/dev/null 2>&1; then
   echo "gigacode was not found in PATH" >&2
   exit 1
 fi
 
-PROMPT="$(cat <<'EOF'
-$project-context-authoring
+if [ ! -f "$PROMPT_FILE" ]; then
+  echo "Repository prompt is missing: $PROMPT_FILE" >&2
+  exit 1
+fi
 
-Работай только с текущим репозиторием. Подготовь его для локального UVZ RAG.
-
-1. Найди корневой Gradle-проект, все include(...) подмодули и самостоятельные
-   вложенные buildable-проекты. Не выходи за пределы текущего репозитория.
-2. Для самого репозитория и каждого независимо подключаемого модуля создай или
-   обнови project-context.yaml строго по schema version 1 из reference скилла.
-   Правильно классифицируй application, library, library-suite и support-module.
-3. Создай или исправь подтверждённые docs/usage/*.md только по коду, тестам и
-   существующей конфигурации. Не меняй production-код, Gradle-конфигурацию,
-   миграции или тесты.
-4. Все пояснения пиши по-русски. Не переводи технические идентификаторы, код,
-   Gradle aliases, классы, методы, YAML-ключи и пути.
-5. Для каждой внутренней Gradle-зависимости сначала вызови MCP-инструмент
-   suggest_dependency с названием артефакта. Сверь alias и координаты с
-   возвращённой структурной записью uvz-platform version catalog.
-   Используй libs alias, например implementation(libs.sbertoneAdapter), только
-   при однозначном совпадении. Никогда не выводи alias по имени артефакта. Если
-   alias или строка catalog не подтверждены, не выдумывай их и не хардкодь
-   group:name:version.
-6. Evidence должен содержать относительный путь в репозитории и, если он
-   достоверно известен, Bitbucket permalink на конкретный commit. Никогда не
-   пиши абсолютные пути этого компьютера.
-7. В конце перечисли созданные/изменённые файлы, доказательства и неизвестные
-   моменты, которые должен подтвердить владелец проекта.
-8. Перед завершением проверь, что каждый путь evidence/examples/components
-   существует и ни один созданный файл не содержит абсолютный локальный путь.
-EOF
-)"
+GIT_ROOT="$(git -C "$PROJECT" rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -z "$GIT_ROOT" ]; then
+  echo "Not inside a Git repository: $PROJECT" >&2
+  exit 1
+fi
+PROJECT="$(cd "$GIT_ROOT" && pwd)"
+if ! "$CHECK_WORKTREE" "$PROJECT"; then
+  echo "Refusing to start: repository has changes outside project-context.yaml and docs/usage/*.md" >&2
+  exit 3
+fi
+PROMPT="$(<"$PROMPT_FILE")"
+OUTPUT_FORMAT="${PROJECT_CONTEXT_OUTPUT_FORMAT:-stream-json}"
+GIGACODE_ARGS=(
+  --approval-mode=auto-edit
+  --allowed-mcp-server-names local-library-mcp
+  --allowed-tools mcp__local-library-mcp__suggest_dependency
+  --allowed-tools mcp__local-library-mcp__find_library_usages
+)
+if [ "$OUTPUT_FORMAT" = "stream-json" ]; then
+  GIGACODE_ARGS+=(--output-format stream-json --include-partial-messages)
+elif [ "$OUTPUT_FORMAT" != "text" ]; then
+  echo "PROJECT_CONTEXT_OUTPUT_FORMAT must be text or stream-json" >&2
+  exit 2
+fi
 
 cd "$PROJECT"
-gigacode -p "$PROMPT" --approval-mode=auto-edit
+echo "Starting isolated GigaCode session in $PROJECT" >&2
+gigacode "${GIGACODE_ARGS[@]}" "$PROMPT"
+if ! "$CHECK_WORKTREE" "$PROJECT"; then
+  echo "FAILED SAFETY CHECK: agent changed files outside the authoring scope; inspect them manually" >&2
+  exit 4
+fi
 "$SCRIPT_DIR/validate-project-context.sh" "$PROJECT"

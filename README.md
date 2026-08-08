@@ -127,112 +127,67 @@ Authoring skill устанавливается только maintainer-у:
 ./scripts/install-project-context-authoring.sh
 ```
 
-После установки перезапусти GigaCode и открой корень workspace. Один
-координатор может автоматически обработать все repositories: он запускает по
-одному субагенту на repository, а каждый субагент проходит модули своего
-repository в строгой очереди.
+После установки перезапусти GigaCode. Не запускай один workspace-wide prompt и
+не используй repository-субагентов: их file tools часто не имеют права писать в
+соседние Git roots и начинают запрашивать approvals либо обходить sandbox через
+shell.
 
-### Готовый промт для всей workspace
+### Последовательная обработка всей workspace
 
-Рекомендуется не больше трёх repository-субагентов одновременно. Это быстрее
-полностью последовательного режима, но не смешивает контекст разных проектов.
-Dirty repositories с посторонними изменениями пропускаются без удаления файлов.
+Запусти deterministic runner из MCP repository:
 
-```text
-Ты координатор пересоздания project context во всей workspace.
-
-Workspace: /path/to/projects
-MCP repository: /path/to/projects/uvz-local-library-mcp
-
-Не создавай контекст самостоятельно и не коммить изменения. Твоя задача —
-построить очередь, запускать repository-субагентов и проверять их результат.
-
-1. Проверь наличие инструмента Subagent/Task. Если он недоступен, остановись до
-   удаления любых файлов и сообщи, что автоматический workspace-run невозможен.
-
-2. Рекурсивно найди все Git roots внутри workspace. Не включай вложенный Git
-   root повторно. Если в MCP repository есть index-exclude.txt, прочитай его и
-   исключи перечисленные там имена. Также пропусти сам
-   uvz-local-library-mcp, служебные runtime-папки и public repositories jimmer,
-   jimmer-docs, jimmer-examples:
-   для них project-context-authoring не требуется.
-
-3. Для каждого repository проверь git status. Если есть изменения, не
-   относящиеся к project-context.yaml или docs/usage/*.md, пометь repository как
-   skipped_dirty и ничего в нём не удаляй.
-
-4. Построй детерминированную очередь по имени repository. Запускай отдельного
-   субагента на каждый clean repository, максимум по 3 одновременно. После
-   завершения очередной тройки собери результаты и только затем запускай
-   следующую. Один repository всегда принадлежит только одному субагенту.
-
-5. Каждому repository-субагенту передай абсолютные пути repository и MCP, а
-   также следующую инструкцию:
-
-   $project-context-authoring
-
-   Работай только внутри назначенного Git repository. Полностью пересоздай его
-   project context по schema_version: 1. Не коммить изменения.
-
-   а. Найди все build roots и модули по settings.gradle(.kts),
-      build.gradle(.kts), pom.xml, package.json и вложенным самостоятельным
-      проектам. Учитывай библиотеки внутри application repository, даже если
-      приложение их сейчас не подключает. adapter, facade, model-shared и дети
-      *-lib являются обязательными кандидатами.
-
-   б. Составь очередь модулей и обрабатывай её последовательно: сначала
-      independently consumable child libraries/support modules, затем
-      application/root/library-suite. Не запускай несколько module writers,
-      изменяющих один repository одновременно.
-
-   в. До удаления прочитай все старые project-context.yaml и собери их examples
-      paths в старом и новом формате. Затем удали все старые
-      project-context.yaml и только те docs/usage/*.md, которые были указаны в
-      их examples. Не удаляй другие docs, README, source, tests, build files и
-      migrations.
-
-   г. Для каждой independently consumable library, deployable application и
-      consumer-facing support-module создай отдельный project-context.yaml.
-      Внутренний технический модуль пропускай только с доказательством.
-      db-scripts получает support-module card только если consumers подключают
-      его для grants, DDL, fixtures или тестовой базы. Config/docs-only
-      repository без поддерживаемого runtime-модуля не заставляй искусственно
-      становиться library — отчитайся, что карточка не требуется.
-
-   д. Создай 1–3 docs/usage/*.md только для доказанных golden paths. Все
-      пояснения пиши по-русски. Не переводи technical identifiers. Evidence
-      paths должны существовать и быть относительными корню Git repository.
-      Не выдумывай API, configuration keys, ограничения, Bitbucket URL и
-      dependencies. Для внутренней Gradle dependency сначала вызови MCP
-      suggest_dependency и используй только подтверждённый libs alias без
-      версии. Неподтверждённое занеси в unknowns.
-
-   е. Root library-suite card создавай последней. Она только перечисляет
-      components и не дублирует API, dependency, configuration и examples
-      дочерних карточек.
-
-   ж. Не меняй production code, build files, tests и migrations. Запусти
-      "<MCP repository>/skills/project-context-authoring/scripts/validate-project-context.sh"
-      "<repository>" и исправь все ошибки. При failed validation верни статус
-      failed, а не successful.
-
-   з. Верни координатору структурированный итог: repository, status,
-      discovered_modules, created_cards, created_usage, skipped_modules,
-      unknowns, validation_result и changed_files.
-
-6. Если субагент вернул failed validation, отправь ему одну follow-up задачу на
-   исправление. Если повторная проверка не прошла, пометь repository как failed
-   и продолжай очередь; не удаляй результаты других repositories.
-
-7. После завершения всей очереди не запускай индексацию и не коммить файлы.
-   Выведи общую таблицу: successful, skipped_dirty, no_context_required,
-   failed; число карточек и usage-файлов; unknowns и repositories, требующие
-   ручной проверки.
+```bash
+./skills/project-context-authoring/scripts/run-all-project-contexts.sh \
+  "/path/to/projects"
 ```
 
-Так maintainer запускает одну задачу на workspace. Параллельность применяется
-между repositories, а модули внутри одного repository обрабатываются
-последовательно — это исключает конфликты root/component cards.
+Runner:
+
+- находит все Git repositories и обрабатывает их строго по одному;
+- для каждого запускает новый GigaCode-процесс из корня этого repository,
+  поэтому штатные file-editing tools находятся внутри разрешённого workspace;
+- включает `auto-edit` и заранее разрешает только read-only MCP tools
+  `suggest_dependency` и `find_library_usages`;
+- запрещает агенту создавать файлы через shell/heredoc;
+- до и после session проверяет Git worktree и завершает repository со статусом
+  failed, если агент изменил файл вне `project-context.yaml` или
+  `docs/usage/*.md`; подозрительные изменения не откатываются автоматически;
+- показывает live `stream-json` и сохраняет отдельный log каждого repository;
+- пропускает repositories с посторонними dirty-изменениями;
+- после каждой session запускает deterministic validator;
+- записывает resume-state и при повторном запуске пропускает уже успешный
+  repository на том же commit, если его карточки всё ещё валидны.
+
+State и logs локальны и игнорируются Git:
+
+```text
+.project-context-authoring-state.tsv
+.project-context-authoring-logs/
+```
+
+После прерывания просто повтори ту же команду. Для сознательного полного
+перезапуска используй `--restart`: старый state будет перемещён в timestamped
+backup, а не удалён.
+
+```bash
+./skills/project-context-authoring/scripts/run-all-project-contexts.sh \
+  "/path/to/projects" --restart
+```
+
+Если raw live JSON слишком шумный, переключи вывод на обычный текст:
+
+```bash
+PROJECT_CONTEXT_OUTPUT_FORMAT=text \
+  ./skills/project-context-authoring/scripts/run-all-project-contexts.sh \
+  "/path/to/projects"
+```
+
+Один repository можно обработать тем же безопасным способом:
+
+```bash
+./skills/project-context-authoring/scripts/run-project-context.sh \
+  "/path/to/one-project"
+```
 
 ### Проверка одного repository без индексации
 

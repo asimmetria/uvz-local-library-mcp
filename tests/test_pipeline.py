@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -173,6 +174,130 @@ class KnowledgePipelineTest(unittest.TestCase):
         self.assertTrue(verified["passed"])
         self.assertTrue(verified["results"][0]["provenance_valid"])
         connection.close()
+
+    def test_safe_sequential_authoring_runner(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "projects"
+            clean = workspace / "clean-project"
+            dirty = workspace / "dirty-project"
+            for project in (clean, dirty):
+                project.mkdir(parents=True)
+                (project / "README.md").write_text(
+                    "# Fixture\n\nТестовый проект.\n", encoding="utf-8"
+                )
+                subprocess.run(["git", "init", str(project)], check=True, capture_output=True)
+                subprocess.run(["git", "-C", str(project), "add", "."], check=True)
+                subprocess.run(
+                    [
+                        "git", "-C", str(project),
+                        "-c", "user.name=Fixture",
+                        "-c", "user.email=fixture@example.invalid",
+                        "commit", "-m", "Fixture",
+                    ],
+                    check=True,
+                    capture_output=True,
+                )
+            (dirty / "README.md").write_text(
+                "# Fixture\n\nНезавершённое изменение пользователя.\n", encoding="utf-8"
+            )
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            calls = root / "gigacode-calls.jsonl"
+            fake_gigacode = fake_bin / "gigacode"
+            fake_gigacode.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, os, sys\n"
+                "from pathlib import Path\n"
+                "with Path(os.environ['FAKE_GIGACODE_CALLS']).open('a', encoding='utf-8') as out:\n"
+                "    out.write(json.dumps({'cwd': str(Path.cwd()), 'args': sys.argv[1:]}, ensure_ascii=False) + '\\n')\n"
+                "name = Path.cwd().name\n"
+                "Path('project-context.yaml').write_text(\n"
+                "    'schema_version: 1\\n'\n"
+                "    'kind: application\\n'\n"
+                "    f'name: {name}\\n'\n"
+                "    'purpose: Описывает тестовое приложение.\\n'\n"
+                "    'use_when:\\n  - Нужно проверить безопасный runner.\\n'\n"
+                "    'evidence:\\n  - path: README.md\\n    proves: Подтверждает назначение проекта.\\n',\n"
+                "    encoding='utf-8',\n"
+                ")\n"
+                "if os.environ.get('FAKE_GIGACODE_UNSAFE') == '1':\n"
+                "    Path('README.md').write_text('# Unsafe\\n', encoding='utf-8')\n"
+                "print('fake gigacode completed')\n",
+                encoding="utf-8",
+            )
+            fake_gigacode.chmod(0o755)
+            state = root / "authoring-state.tsv"
+            logs = root / "logs"
+            environment = os.environ.copy()
+            environment.update({
+                "PATH": str(fake_bin) + os.pathsep + environment.get("PATH", ""),
+                "FAKE_GIGACODE_CALLS": str(calls),
+                "PROJECT_CONTEXT_STATE_FILE": str(state),
+                "PROJECT_CONTEXT_LOG_DIR": str(logs),
+                "PROJECT_CONTEXT_OUTPUT_FORMAT": "text",
+                "PYTHON_BIN": sys.executable,
+            })
+            runner = ROOT / "skills/project-context-authoring/scripts/run-all-project-contexts.sh"
+            first = subprocess.run(
+                ["bash", str(runner), str(workspace)],
+                cwd=ROOT,
+                env=environment,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(0, first.returncode, first.stdout + first.stderr)
+            invocations = [json.loads(line) for line in calls.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(1, len(invocations))
+            self.assertEqual(clean.resolve(), Path(invocations[0]["cwd"]).resolve())
+            arguments = invocations[0]["args"]
+            self.assertIn("--approval-mode=auto-edit", arguments)
+            self.assertIn("--allowed-mcp-server-names", arguments)
+            self.assertIn("mcp__local-library-mcp__suggest_dependency", arguments)
+            self.assertIn("mcp__local-library-mcp__find_library_usages", arguments)
+            self.assertIn("$project-context-authoring", arguments[-1])
+            self.assertIn("SKIPPED_DIRTY", first.stdout)
+            self.assertTrue((clean / "project-context.yaml").is_file())
+            self.assertFalse((dirty / "project-context.yaml").exists())
+            self.assertIn("successful", state.read_text(encoding="utf-8"))
+            self.assertIn("skipped_dirty", state.read_text(encoding="utf-8"))
+            second = subprocess.run(
+                ["bash", str(runner), str(workspace)],
+                cwd=ROOT,
+                env=environment,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(0, second.returncode, second.stdout + second.stderr)
+            self.assertIn("Уже успешно обработан", second.stdout)
+            self.assertEqual(1, len(calls.read_text(encoding="utf-8").splitlines()))
+            unsafe = root / "unsafe-project"
+            unsafe.mkdir()
+            (unsafe / "README.md").write_text("# Safe before agent\n", encoding="utf-8")
+            subprocess.run(["git", "init", str(unsafe)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(unsafe), "add", "."], check=True)
+            subprocess.run(
+                [
+                    "git", "-C", str(unsafe),
+                    "-c", "user.name=Fixture",
+                    "-c", "user.email=fixture@example.invalid",
+                    "commit", "-m", "Fixture",
+                ],
+                check=True,
+                capture_output=True,
+            )
+            unsafe_environment = {**environment, "FAKE_GIGACODE_UNSAFE": "1"}
+            one_runner = ROOT / "skills/project-context-authoring/scripts/run-project-context.sh"
+            unsafe_result = subprocess.run(
+                ["bash", str(one_runner), str(unsafe)],
+                cwd=ROOT,
+                env=unsafe_environment,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(4, unsafe_result.returncode)
+            self.assertIn("FAILED SAFETY CHECK", unsafe_result.stderr)
+            self.assertIn(" M README.md", unsafe_result.stdout)
 
     def test_project_context_rejects_non_portable_or_missing_evidence(self):
         with tempfile.TemporaryDirectory() as directory:

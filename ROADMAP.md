@@ -18,7 +18,8 @@ Roadmap выполняется сверху вниз. Новый этап нач
 - `suggest_dependency` для `uvz-platform`;
 - ingestion audit, retrieval evaluation и атомарная публикация;
 - portable knowledge pack и установка одним проектом;
-- authoring skill и workspace-промт с repository-субагентами.
+- authoring skill и безопасный последовательный workspace-runner с isolated
+  repository sessions, resume-state и per-repository logs.
 
 ## Этап 1. Cross-repository usage graph
 
@@ -111,6 +112,10 @@ version 3; перед закрытием этапа требуется прог�
 
 ## Этап 5. Возобновляемая workspace-кампания
 
+Основа уже есть в authoring runner: последовательная ownership-модель,
+resume-state и logs. На этом этапе она будет расширена до полного набора
+статусов, структурированных summaries и coverage-aware resume.
+
 Задача: безопасно подготовить context для большой workspace за несколько
 запусков агента.
 
@@ -119,7 +124,7 @@ version 3; перед закрытием этапа требуется прог�
 1. Добавить ignored state-файл со статусом каждого repository.
 2. Поддержать состояния `pending`, `running`, `successful`, `skipped_dirty`,
    `no_context_required`, `failed`.
-3. Сохранять summary после каждого repository-субагента.
+3. Сохранять структурированный summary после каждой isolated repository session.
 4. Поддержать resume только для pending/failed repositories.
 5. Формировать итоговый отчёт и список unknowns.
 

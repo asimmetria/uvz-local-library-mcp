@@ -10,6 +10,15 @@ description: "Создаёт и проверяет project-context.yaml и docs/
 
 ## Жёсткие правила
 
+- Обрабатывай ровно один Git repository в одной agent session. Не запускай
+  субагентов и не пытайся редактировать соседние repositories. Для всей
+  workspace используй bundled `scripts/run-all-project-contexts.sh`, который
+  создаёт отдельную session из корня каждого repository.
+- Создавай, изменяй и удаляй файлы только штатными file-editing tools агента.
+  Не используй shell redirection, heredoc, `tee`, `sed -i`, `perl -i` или
+  Python/Node scripts как обход запрета на запись. Если file tool сообщает, что
+  путь вне workspace или запись запрещена, остановись со статусом
+  `blocked_workspace`; не проси shell обойти sandbox.
 - Весь пояснительный текст пиши по-русски. Не переводи package/class/method,
   Gradle aliases, coordinates, configuration keys, команды, пути и код.
 - Используй только schema version 1 из
@@ -48,13 +57,16 @@ description: "Создаёт и проверяет project-context.yaml и docs/
    корректный вызов доказать нельзя, не создавай фиктивный пример и запиши
    пробел в `unknowns`.
 7. Повторно открой созданные файлы и выполни финальную проверку ниже.
-8. Если доступен bundled script, запусти
-   `scripts/validate-project-context.sh <корень-репозитория>` и исправь все
-   ошибки. Не объявляй работу завершённой при failed validation.
+8. Не запускай shell-валидатор из agent session: внешний runner выполнит его
+   после завершения. Сам проверь schema и пути штатными read/search tools. Не
+   объявляй работу завершённой, если запись заблокирована или проверка файлов
+   выявила ошибку.
 
 ## Dependency
 
 Для внутренней Gradle-библиотеки сначала вызови MCP `suggest_dependency`.
+Это read-only MCP tool; bundled runner разрешает его заранее вместе с
+`find_library_usages`, поэтому отдельное подтверждение не требуется.
 Записывай `dependency.alias` и `dependency.declaration` только при однозначном
 совпадении alias и coordinates со структурной записью `uvz-platform` catalog.
 Используй подтверждённый вид вроде `implementation(libs.sbertoneAdapter)` без
