@@ -5,14 +5,15 @@ import re
 
 
 SEPARATORS = re.compile(r"[-_.]+")
-ALIAS_USE = re.compile(r"\blibs\.([A-Za-z0-9_.]+)")
-FUNCTION_CALL = re.compile(r"\b([A-Za-z][A-Za-z0-9_]*)\s*\(")
+SCAN_TOKEN = re.compile(
+    r"\blibs\.([A-Za-z0-9_.]+)|\b([A-Za-z][A-Za-z0-9_]*)\b|([()])"
+)
 KNOWN_CONFIGURATIONS = {
     "api", "implementation", "compileOnly", "runtimeOnly",
     "testImplementation", "testCompileOnly", "testRuntimeOnly",
     "annotationProcessor", "kapt", "ksp",
 }
-WRAPPERS = {"platform", "enforcedPlatform", "project", "files"}
+WRAPPERS = {"platform", "enforcedPlatform", "project", "files", "add"}
 
 
 def accessor(alias):
@@ -176,17 +177,26 @@ def without_comments_and_strings(text):
     return "".join(output)
 
 
-def configuration_for_line(line, alias_start):
-    calls = [match.group(1) for match in FUNCTION_CALL.finditer(line[:alias_start])]
-    for value in calls:
+def configuration_for_context(line, alias_start, open_calls, original, alias_position):
+    for value, _ in open_calls:
         if value in KNOWN_CONFIGURATIONS:
             return value
-    identifiers = re.findall(r"\b[A-Za-z][A-Za-z0-9_]*\b", line[:alias_start])
-    for value in identifiers:
-        if value in KNOWN_CONFIGURATIONS:
-            return value
-    for value in reversed(calls):
-        if value not in WRAPPERS:
+    for value, open_position in reversed(open_calls):
+        if value != "add":
+            continue
+        prefix = original[open_position + 1:alias_position]
+        declaration = re.match(
+            r"\s*(['\"])([A-Za-z][A-Za-z0-9_]*)\1\s*,", prefix, flags=re.DOTALL
+        )
+        if declaration:
+            return declaration.group(2)
+    # Groovy DSL commonly omits parentheses: `runtimeOnly libs.someAlias`.
+    statement = re.split(r"[;{}]", line[:alias_start])[-1]
+    declaration = re.match(r"\s*([A-Za-z][A-Za-z0-9_]*)\b", statement)
+    if declaration and declaration.group(1) in KNOWN_CONFIGURATIONS:
+        return declaration.group(1)
+    for value, _ in reversed(open_calls):
+        if value and value not in WRAPPERS:
             return value
     return "unknown"
 
@@ -194,16 +204,46 @@ def configuration_for_line(line, alias_start):
 def find_alias_usages(text):
     cleaned = without_comments_and_strings(text)
     result = []
-    for line_number, line in enumerate(cleaned.splitlines(), 1):
-        for match in ALIAS_USE.finditer(line):
-            found_accessor = match.group(1).rstrip(".")
-            if found_accessor.startswith(("bundles.", "plugins.", "versions.")):
-                continue
-            result.append({
-                "accessor": found_accessor,
-                "configuration": configuration_for_line(line, match.start()),
-                "line": line_number,
-            })
+    open_calls = []
+    pending_identifier = None
+    previous_end = 0
+    line_number = 1
+    for match in SCAN_TOKEN.finditer(cleaned):
+        gap = cleaned[previous_end:match.start()]
+        line_number += gap.count("\n")
+        if gap.strip():
+            pending_identifier = None
+        found_accessor, identifier, parenthesis = match.groups()
+        if found_accessor is not None:
+            found_accessor = found_accessor.rstrip(".")
+            if not found_accessor.startswith(("bundles.", "plugins.", "versions.")):
+                line_start = cleaned.rfind("\n", 0, match.start()) + 1
+                line_end = cleaned.find("\n", match.end())
+                if line_end < 0:
+                    line_end = len(cleaned)
+                line = cleaned[line_start:line_end]
+                result.append({
+                    "accessor": found_accessor,
+                    "configuration": configuration_for_context(
+                        line,
+                        match.start() - line_start,
+                        open_calls,
+                        text,
+                        match.start(),
+                    ),
+                    "line": line_number,
+                })
+            pending_identifier = None
+        elif identifier is not None:
+            pending_identifier = identifier
+        elif parenthesis == "(":
+            open_calls.append((pending_identifier, match.start()))
+            pending_identifier = None
+        else:
+            if open_calls:
+                open_calls.pop()
+            pending_identifier = None
+        previous_end = match.end()
     return result
 
 

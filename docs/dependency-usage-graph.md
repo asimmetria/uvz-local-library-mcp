@@ -19,6 +19,11 @@ consumer-модулями.
 граф. Для каждого consumer сохраняются repository, Gradle module, build path,
 configuration, line и commit.
 
+Configuration определяется и для однострочного, и для многострочного Kotlin/
+Groovy DSL: `implementation(libs.x)`, `runtimeOnly libs.x`, nested wrappers вроде
+`testImplementation(platform(libs.x))` и `add("customConfiguration", libs.x)`.
+Provider suffixes `get()`, `orNull` и `getOrNull()` связываются с базовым alias.
+
 Каждое usage-ребро связано с конкретным catalog path, поэтому одинаковые alias
 из разных catalog-файлов не смешивают provenance и consumer examples.
 

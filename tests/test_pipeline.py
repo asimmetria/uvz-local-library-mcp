@@ -86,6 +86,18 @@ class KnowledgePipelineTest(unittest.TestCase):
             "  /* runtimeOnly(libs.blockCommentOnly) */\n"
             "  testImplementation(platform(libs.fixtureBom))\n"
             "  runtimeOnly libs.legacyRuntime\n"
+            "  implementation(\n"
+            "    platform(\n"
+            "      libs.multilineBom\n"
+            "    )\n"
+            "  )\n"
+            "  customBucket(\n"
+            "    libs.customLibrary\n"
+            "  )\n"
+            "  add(\n"
+            "    \"integrationTestImplementation\",\n"
+            "    libs.integrationSupport\n"
+            "  )\n"
             "}\n"
         )
         self.assertEqual(
@@ -93,6 +105,9 @@ class KnowledgePipelineTest(unittest.TestCase):
                 {"accessor": "fixtureLibrary", "configuration": "implementation", "line": 2},
                 {"accessor": "fixtureBom", "configuration": "testImplementation", "line": 7},
                 {"accessor": "legacyRuntime", "configuration": "runtimeOnly", "line": 8},
+                {"accessor": "multilineBom", "configuration": "implementation", "line": 11},
+                {"accessor": "customLibrary", "configuration": "customBucket", "line": 15},
+                {"accessor": "integrationSupport", "configuration": "integrationTestImplementation", "line": 19},
             ],
             usages,
         )
@@ -192,7 +207,7 @@ class KnowledgePipelineTest(unittest.TestCase):
             (source / "build.gradle.kts").write_text(
                 "dependencies {\n"
                 "    implementation(libs.fixtureLibrary)\n"
-                "    api(libs.helperAdapter)\n"
+                "    api(libs.helperAdapter.get())\n"
                 "    testImplementation(libs.fixtureTestKit)\n"
                 "    // runtimeOnly(libs.ignoredAlias)\n"
                 "    val sample = \"libs.ignoredAlias\"\n"

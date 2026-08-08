@@ -305,6 +305,12 @@ def index_dependency_graph(con, *, pack, aliases, usages, owners, audit):
     for usage in usages:
         matches = by_accessor.get(usage["accessor"], [])
         if not matches:
+            for suffix in (".get", ".orNull", ".getOrNull"):
+                if usage["accessor"].endswith(suffix):
+                    matches = by_accessor.get(usage["accessor"][:-len(suffix)], [])
+                    if matches:
+                        break
+        if not matches:
             audit["dependency_usages_unresolved"] += 1
             continue
         if len(matches) > 1:
