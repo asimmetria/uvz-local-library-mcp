@@ -73,10 +73,32 @@ Evaluator дополнительно всегда требует коррект�
 
 Tracked-файл содержит публичные Jimmer fixtures. В рабочем окружении создай
 ignored `evaluation-cases.local.json`, сохрани в нём Jimmer cases и добавь
-важные сценарии отдела. Для закрытия этапа usage graph добавь минимум три
-`dependency_cases` с разными реальными библиотеками и consumers, а в thresholds
-укажи `min_dependency_cases: 3`. Порог считает только positive cases; negative
-проверки отсутствующих aliases полезны, но не заменяют реальные сценарии. Запуск:
+важные сценарии отдела.
+
+После первой сборки schema version 3 можно создать неперезаписываемый черновик
+из реальных рёбер текущей БД:
+
+```bash
+python3 scripts/draft-dependency-cases.py \
+  --db knowledge.db \
+  --base evaluation-cases.json \
+  --output evaluation-cases.local.json \
+  --limit 3
+```
+
+Скрипт выбирает разные aliases с известной configuration, фиксирует одного
+consumer для каждого и ставит `review_required: true`. Он не перезаписывает
+существующий файл. Проверь каждый alias, module и path непосредственно в
+исходном repository; поправь черновик, если выбранный consumer не является
+хорошим эталоном, затем явно поставь `review_required: false`. Пока флаг равен
+`true`, quality gate и упаковка не пройдут. Не генерируй файл заново перед
+каждой сборкой — сохранённые
+ожидания должны обнаруживать регрессии, а не повторять текущее состояние БД.
+
+Для закрытия этапа usage graph нужны минимум три `dependency_cases` с разными
+реальными библиотеками и consumers. Порог `min_dependency_cases` считает только
+positive cases; negative проверки отсутствующих aliases полезны, но не заменяют
+реальные сценарии. После review повтори сборку уже с зафиксированным definition:
 
 ```bash
 ./install.sh \

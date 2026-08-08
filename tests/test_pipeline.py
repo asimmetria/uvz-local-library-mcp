@@ -397,6 +397,50 @@ class KnowledgePipelineTest(unittest.TestCase):
                 "--output-dir", build_output,
                 "--evaluation-cases", cases,
             )
+            dependency_draft = workspace / "evaluation-cases.local.json"
+            self.run_script(
+                "scripts/draft-dependency-cases.py",
+                "--db", database,
+                "--base", ROOT / "evaluation-cases.json",
+                "--output", dependency_draft,
+                "--limit", "3",
+            )
+            draft_definition = json.loads(dependency_draft.read_text(encoding="utf-8"))
+            self.assertTrue(draft_definition["dependency_case_draft"]["review_required"])
+            self.assertEqual(
+                3, draft_definition["dependency_case_draft"]["generated_positive_cases"]
+            )
+            self.assertEqual(3, draft_definition["thresholds"]["min_dependency_cases"])
+            self.assertEqual(
+                {"fixtureLibrary", "fixtureTestKit", "helperAdapter"},
+                {
+                    case["expected_aliases"][0]
+                    for case in draft_definition["dependency_cases"]
+                },
+            )
+            draft_connection = sqlite3.connect(database)
+            draft_connection.row_factory = sqlite3.Row
+            try:
+                unreviewed = evaluate_dependency_graph(draft_connection, draft_definition)
+                self.assertFalse(unreviewed["review_acknowledged"])
+                self.assertFalse(unreviewed["passed"])
+                draft_definition["dependency_case_draft"]["review_required"] = False
+                reviewed = evaluate_dependency_graph(draft_connection, draft_definition)
+                self.assertTrue(reviewed["review_acknowledged"])
+                self.assertTrue(reviewed["passed"])
+            finally:
+                draft_connection.close()
+            original_draft = dependency_draft.read_bytes()
+            refused_overwrite = self.run_script(
+                "scripts/draft-dependency-cases.py",
+                "--db", database,
+                "--base", ROOT / "evaluation-cases.json",
+                "--output", dependency_draft,
+                "--limit", "3",
+                check=False,
+            )
+            self.assertNotEqual(0, refused_overwrite.returncode)
+            self.assertEqual(original_draft, dependency_draft.read_bytes())
             self.assertEqual(SCHEMA_VERSION, validate_database(database))
             audit_report = json.loads(audit.read_text(encoding="utf-8"))
             self.assertEqual(1, audit_report["duplicate_content_groups"])

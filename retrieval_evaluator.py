@@ -211,6 +211,9 @@ def expected_consumer_matches(expected, actual):
 def evaluate_dependency_graph(connection, definition):
     """Evaluate structured alias and consumer retrieval independently from FTS."""
     cases = definition.get("dependency_cases", [])
+    review_acknowledged = not bool(
+        definition.get("dependency_case_draft", {}).get("review_required")
+    )
     thresholds = definition.get("thresholds", {})
     minimum_cases = max(int(thresholds.get("min_dependency_cases", 0)), 0)
     minimum_pass_rate = float(thresholds.get("min_dependency_pass_rate", 1.0))
@@ -294,7 +297,12 @@ def evaluate_dependency_graph(connection, definition):
             "min_dependency_cases": minimum_cases,
             "min_dependency_pass_rate": minimum_pass_rate,
         },
-        "passed": positive_cases >= minimum_cases and pass_rate >= minimum_pass_rate,
+        "review_acknowledged": review_acknowledged,
+        "passed": (
+            review_acknowledged
+            and positive_cases >= minimum_cases
+            and pass_rate >= minimum_pass_rate
+        ),
         "results": results,
     }
 

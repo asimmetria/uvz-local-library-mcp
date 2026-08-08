@@ -276,6 +276,24 @@ cd /path/to/projects/uvz-local-library-mcp
 Если хотя бы одна карточка невалидна или quality gate не пройден, предыдущая
 рабочая база не заменяется.
 
+После первой сборки schema version 3 создай и вручную проверь три реальные
+dependency graph cases, затем повтори сборку с локальным definition:
+
+```bash
+python3 scripts/draft-dependency-cases.py --limit 3
+
+./install.sh \
+  --workspace "/path/to/projects" \
+  --sync \
+  --configuration-root "/path/to/projects/uvz-config" \
+  --evaluation-cases evaluation-cases.local.json
+```
+
+Генератор не перезаписывает `evaluation-cases.local.json`; подробный review-flow
+описан в [retrieval evaluation](docs/retrieval-evaluation.md). После проверки
+каждого consumer поставь `dependency_case_draft.review_required: false`, иначе
+quality gate намеренно не пройдёт.
+
 ### Исключение repositories
 
 Скопируй шаблон и укажи точные имена директорий, по одному на строку:
